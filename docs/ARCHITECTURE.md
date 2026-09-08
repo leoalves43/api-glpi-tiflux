@@ -1,43 +1,53 @@
 # Architecture
 
-Single-file cron script, `glpi_tiflux.py` (~1100 lines — over the 500-line
-guideline; see decisions/LOG.md 2026-09-08 for why it hasn't been split yet).
-No package, no tests, no framework. Run manually or via cron: `python glpi_tiflux.py`.
+Package `sync/`, entrypoint `glpi_tiflux.py` (10-line shim calling `sync.main.main`
+— keep this filename; cron invokes it directly). No framework. Run manually or
+via cron: `python glpi_tiflux.py`. Split into modules 2026-09-08 (see
+decisions/LOG.md); each file stays under the 500-line guideline.
 
 ## Data flow
 
 ```
-GLPI (REST, session-token auth)  <-->  glpi_tiflux.py  <-->  Tiflux (REST, bearer auth)
+GLPI (REST, session-token auth)  <-->  sync/*.py  <-->  Tiflux (REST, bearer auth)
                                             |
                                             v
                                   Postgres (2 audit tables)
 ```
 
-Two independent sync passes per run, both inside `main()` (glpi_tiflux.py:1032):
+Two independent sync passes per run, both driven from `sync/main.py:main()`:
 
-1. **Ticket creation, GLPI -> Tiflux only.** `buscar_chamados_desde()` (glpi_tiflux.py:305)
-   probes `GET /Ticket/{id}` sequentially (this GLPI install's `/search/Ticket` is
-   unreliable — do not use it). `processar_chamado()` (glpi_tiflux.py:677) translates
-   and creates each ticket in Tiflux, assigns a technician, uploads attachments.
+1. **Ticket creation, GLPI -> Tiflux only.** `GlpiClient.buscar_chamados_desde()`
+   (sync/glpi_client.py) probes `GET /Ticket/{id}` sequentially (this GLPI
+   install's `/search/Ticket` is unreliable — do not use it).
+   `processar_chamado()` (sync/processamento_chamado.py) translates and creates
+   each ticket in Tiflux, assigns a technician, uploads attachments.
 2. **Followup sync, bidirectional, for already-synced open tickets.**
-   `sincronizar_followups()` (glpi_tiflux.py:987) rotates through a batch of
-   `status='sucesso'` tickets, skips closed ones, and calls:
-   - `sincronizar_followups_glpi_para_tiflux()` (glpi_tiflux.py:804) — GLPI
-     `ITILFollowup` -> Tiflux `/answers`, `/client-answers`, or `/internal_communications`.
-   - `sincronizar_followups_tiflux_para_glpi()` (glpi_tiflux.py:923) — Tiflux
-     answers/internal communications -> GLPI `ITILFollowup`.
+   `sincronizar_followups()` (sync/sincronizacao_followups.py) rotates through a
+   batch of `status='sucesso'` tickets, skips closed ones, and calls:
+   - `sincronizar_followups_glpi_para_tiflux()` — GLPI `ITILFollowup` ->
+     Tiflux `/answers`, `/client-answers`, or `/internal_communications`.
+   - `sincronizar_followups_tiflux_para_glpi()` — Tiflux answers/internal
+     communications -> GLPI `ITILFollowup`.
 
-## Module sections (in file order)
+## Modules
 
-| # | Section | Key functions |
-|---|---|---|
-| 1 | CONFIGURAÇÃO | credentials from `credenciais.txt`, all tunable constants |
-| 2 | POSTGRES — auditoria | `registrar_resultado`, `registrar_resultado_followup`, candidate queries |
-| 3 | GLPI — auth & busca | `autenticar_glpi`, `buscar_chamados_desde`, `obter_followups_glpi`, `criar_followup_glpi` |
-| 4 | TRADUÇÃO (regras de negócio) | category->desk mapping, requester/technician resolution, HTML->plaintext |
-| 5 | PROCESSAMENTO DE UM CHAMADO | `processar_chamado` — creates one ticket end to end |
-| 5B | SINCRONIZAÇÃO DE FOLLOWUPS | the two directional sync functions + orchestrator |
-| 6 | MAIN | `main()` |
+| File | Responsibility |
+|---|---|
+| `sync/config.py` | `Config` (frozen dataclass, built once in `main()` — nothing does file I/O at import time), `carregar_credenciais`, `log()` |
+| `sync/db_chamados.py` | Postgres — one row per GLPI ticket (`api_glpi_tiflux`) |
+| `sync/db_followups.py` | Postgres — one row per followup (`api_glpi_tiflux_followups`) |
+| `sync/glpi_client.py` | `GlpiClient` — thin wrapper over GLPI REST, owns the session headers |
+| `sync/tiflux_client.py` | `TifluxClient` — thin wrapper over Tiflux REST, owns the header dicts and the mesa-validation cache |
+| `sync/html_texto.py` | `html_para_texto_plano()` — GLPI HTML description -> Tiflux plain text |
+| `sync/regras_negocio.py` | category->desk mapping, technician/priority lookup, requester-is-author check |
+| `sync/processamento_chamado.py` | `processar_chamado()` — creates one ticket end to end |
+| `sync/sincronizacao_followups.py` | the two directional sync functions + orchestrator |
+| `sync/main.py` | `main()` — wiring, candidate selection, top-level logging |
+
+`GlpiClient` and `TifluxClient` are constructed once per run (in `main()`) and
+threaded through as parameters — no module-level globals, no per-call
+re-authentication. `TifluxClient` caches the client's valid desks on first use
+(instance attribute, not global).
 
 ## Two audit tables (Postgres, schema from `DB_SCHEMA` cred, default `siap_custom`)
 
@@ -57,8 +67,8 @@ Full DDL and column reference: `docs/data/audit_tables.toon`. Summary:
   instance (10.3.3.68) during development.
 - Tiflux: bearer auth, documented in `openapi-spec-tiflux.json` (local file,
   1.7MB — grep it, don't read it whole). Three header dicts exist for a reason:
-  `headers_tiflux_get` (GET only, no Content-Type — see comment at glpi_tiflux.py:88),
-  `headers_tiflux_json`, `headers_tiflux_form` (unused by followup code — followup
+  `_headers_get` (GET only, no Content-Type — see comment in `TifluxClient.__init__`),
+  `_headers_json`, `_headers_form` (unused by followup code — followup
   POSTs use `files={"field": (None, value)}` to force real multipart; see LOG.md).
 
 ## Known pre-existing bug (not fixed, tracked)
