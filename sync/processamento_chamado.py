@@ -113,7 +113,7 @@ def _resolver_prioridade(mesa_tiflux: int) -> int:
         raise _ChamadoNaoSincronizavel(
             "erro",
             f"Mesa {mesa_tiflux} não tem prioridade configurada em PRIORIDADE_POR_MESA "
-            f"(rode listar_config_tiflux.py pra descobrir o ID certo e preencha o dicionário)",
+            f"(descubra o ID certo na API do Tiflux e preencha o dicionário)",
         )
     return id_prioridade_tiflux
 
