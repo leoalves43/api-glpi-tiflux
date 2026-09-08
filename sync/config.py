@@ -1,12 +1,24 @@
 """Credenciais e constantes de configuração da sincronização GLPI <-> Tiflux."""
 
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 
 
 def log(msg: str) -> None:
+    """
+    Mensagens de log usam emojis; alguns ambientes (console do Windows em
+    cp1252, saída redirecionada sem encoding UTF-8) não conseguem codificá-los.
+    Nunca deixa isso derrubar a sincronização — cai pra uma versão sem
+    caracteres não-representáveis nesse caso.
+    """
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{agora}] {msg}")
+    linha = f"[{agora}] {msg}"
+    try:
+        print(linha)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "ascii"
+        print(linha.encode(encoding, errors="replace").decode(encoding))
 
 
 def carregar_credenciais(caminho: str = "credenciais.txt") -> dict[str, str]:
