@@ -1,0 +1,27 @@
+api_glpi_tiflux[8]{column,type,nullable,default,note}:
+  id,SERIAL,false,-,pkey
+  id_glpi,INTEGER,false,-,unique conflict key
+  numero_tiflux,INTEGER,true,-,only trustworthy when status=sucesso
+  status,VARCHAR(20),false,-,sucesso|erro|ignorado(not stored)
+  mensagem,TEXT,true,-,-
+  tentativas,INTEGER,false,1,incremented on ON CONFLICT UPDATE
+  criado_em,TIMESTAMP,false,now(),-
+  atualizado_em,TIMESTAMP,false,now(),-
+
+api_glpi_tiflux_followups[11]{column,type,nullable,default,note}:
+  id,SERIAL,false,-,pkey
+  id_glpi,INTEGER,false,-,ticket this followup belongs to
+  numero_tiflux,INTEGER,true,-,-
+  direcao,VARCHAR(20),false,-,glpi_para_tiflux|tiflux_para_glpi|verificacao_status
+  tipo,VARCHAR(20),false,-,publica|interna|status
+  id_origem,INTEGER,false,-,part of unique conflict key (direcao,id_origem); negative -id_glpi sentinel for verificacao_status rows
+  id_destino,INTEGER,true,-,set only on success; null on error
+  status,VARCHAR(20),false,-,sucesso|erro|fechado
+  mensagem,TEXT,true,-,-
+  tentativas,INTEGER,false,1,incremented on ON CONFLICT UPDATE
+  criado_em,TIMESTAMP,false,now(),-
+
+indexes[3]{table,name,columns}:
+  api_glpi_tiflux,idx_api_glpi_tiflux_status,status
+  api_glpi_tiflux_followups,idx_api_glpi_tiflux_followups_status,status
+  api_glpi_tiflux_followups,idx_api_glpi_tiflux_followups_id_glpi,id_glpi

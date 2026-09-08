@@ -1,0 +1,19 @@
+# Decision log
+
+2026-09-08 | Followup sync ships bidirectional in one pass, not staged | User explicitly chose "both directions now" over a GLPI->Tiflux-only phase 1, after being warned about echo-prevention complexity | supersedes nothing
+
+2026-09-08 | Followup POSTs (`/answers`, `/client-answers`, `/internal_communications`) use `files={"field": (None, value)}` instead of `data={...}` | Live-tested: `/internal_communications` returns 415 on `application/x-www-form-urlencoded`; it requires real `multipart/form-data`. `/answers` happened to tolerate the wrong encoding but was switched too for consistency with the documented contract | supersedes the first implementation attempt (used `data=` + `headers_tiflux_form`, worked for `/answers` only)
+
+2026-09-08 | Followup content passed through as HTML unchanged in both directions, no plain-text conversion | Live-verified: GLPI `ITILFollowup.content` and Tiflux `answers.name`/`internal_communications.text` are both real HTML, unlike the ticket `description` field (which is plain text, hence `html_para_texto_plano()` exists only for that field) | supersedes an initial assumption that followups might need the same plain-text treatment as ticket descriptions
+
+2026-09-08 | Applied `html.unescape()` defensively to all followup content before forwarding | Live data showed some GLPI followups return HTML-entity-encoded content (`&#60;p&#62;...`) instead of literal tags, depending on how they were created; `html.unescape()` is a no-op on already-literal HTML so it's safe both ways | none
+
+2026-09-08 | New `api_glpi_tiflux_followups` table instead of extending `api_glpi_tiflux` | Existing table is one-row-per-ticket (`ON CONFLICT (id_glpi)`); followups are many-per-ticket. New table's conflict key is `(direcao, id_origem)` | none
+
+2026-09-08 | Followup candidate queries (`obter_followups_glpi_ja_processados`, `obter_respostas_tiflux_ja_processadas_ou_proprias`) filter to `status='sucesso'` only | First implementation counted any row (including `status='erro'`) as "already handled," so a failed followup was silently never retried. Caught live during testing: a 415 error stayed permanently stuck until this fix | none
+
+2026-09-08 | Closed-ticket skips write a bookkeeping row via `registrar_chamado_fechado_para_followups` (direcao='verificacao_status', id_origem=-id_glpi) | Without it, a closed ticket never gets a followups-table row and permanently sorts first in the "least-recently-checked" rotation (`obter_chamados_para_varrer_followups`), starving real candidates of the per-run budget | none
+
+2026-09-08 | Tiflux->GLPI echo prevention relies primarily on the audit table, with `answer_origin=='api'`/`[API]`-author-prefix as a secondary filter for `/answers` only | `/internal_communications` responses have no equivalent field — confirmed by live testing that manually clearing followup audit rows causes a stale internal communication to be re-imported as a duplicate. Production code never deletes these rows, so this is a testing artifact, not a normal-operation risk | none
+
+2026-09-08 | `glpi_tiflux.py` (~1100 lines) not split despite the 500-line/file guideline | Followup sync was added to the existing single-file script to match its established pattern (numbered `# === N. ===` sections, shared header dicts, shared `log()`/`conectar_db()`). Splitting now would be a larger, separately-reviewable refactor; flagged as a risk in state/HANDOFF.md rather than done silently mid-feature | none
