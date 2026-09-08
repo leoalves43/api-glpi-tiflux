@@ -31,10 +31,14 @@ def depara_categoria(cat_id: int | None) -> int | None:
     return None
 
 
-def definir_tecnico(id_mesa: int, config: Config) -> tuple[int, str]:
+def definir_tecnico(id_mesa: int, config: Config) -> tuple[int | None, str | None]:
+    """
+    Só a mesa ARRECADAÇÃO tem atribuição automática de técnico (Léo Alves).
+    Chamados das demais mesas ficam sem técnico atribuído no Tiflux.
+    """
     if id_mesa == 37964:  # ARRECADAÇÃO
         return config.id_tecnico_leo, "Léo Alves"
-    return config.id_tecnico_sania, "Sânia Almeida"
+    return None, None
 
 
 def definir_prioridade(id_mesa: int) -> int | None:

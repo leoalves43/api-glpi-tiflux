@@ -58,7 +58,6 @@ class Config:
     id_grupo_observador: int = 22  # Embras Atendimentos
 
     id_tecnico_leo: int = 117180
-    id_tecnico_sania: int = 1019979
 
     # Máximo de anexo aceito pelo Tiflux
     tamanho_maximo_anexo_mb: int = 25

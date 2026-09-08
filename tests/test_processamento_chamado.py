@@ -15,6 +15,7 @@ _CONFIG = Config(
 )
 
 _TICKET_ARRECADACAO = {"name": "Problema X", "content": "<p>desc</p>", "priority": 3, "itilcategories_id": 274}
+_TICKET_FINANCAS = {"name": "Problema Y", "content": "<p>desc</p>", "priority": 3, "itilcategories_id": 279}
 
 
 class TestProcessarChamado(unittest.TestCase):
@@ -76,6 +77,20 @@ class TestProcessarChamado(unittest.TestCase):
         self.assertIn("Ticket #T-1 criado no Tiflux", msg)
         self.assertIn("Léo Alves", msg)  # mesa ARRECADAÇÃO -> tecnico Leo
         self.assertNotIn("Anexos", msg)
+
+    def test_sucesso_mesa_diferente_de_arrecadacao_fica_sem_tecnico(self):
+        self.glpi.tickets[1] = _TICKET_FINANCAS
+        status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual((status, numero), ("sucesso", "T-1"))
+        self.assertIn("Sem técnico atribuído", msg)
+        self.assertNotIn("Léo Alves", msg)
+        self.assertNotIn("Sânia", msg)
+
+    def test_nao_chama_atribuir_tecnico_quando_mesa_nao_e_arrecadacao(self):
+        self.glpi.tickets[1] = _TICKET_FINANCAS
+        with patch.object(self.tiflux, "atribuir_tecnico") as atribuir_tecnico:
+            processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        atribuir_tecnico.assert_not_called()
 
     def test_sucesso_com_resumo_de_anexos(self):
         self.glpi.tickets[1] = _TICKET_ARRECADACAO

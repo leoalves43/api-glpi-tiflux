@@ -62,12 +62,14 @@ def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamad
         id_solicitante_tiflux, nome_solicitante, email_solicitante, id_chamado,
     )
     ticket_number_tiflux = _criar_ticket(tiflux, form_data)
-    _atribuir_tecnico(tiflux, ticket_number_tiflux, id_tecnico_tiflux, nome_tecnico_tiflux)
+    if id_tecnico_tiflux is not None:
+        _atribuir_tecnico(tiflux, ticket_number_tiflux, id_tecnico_tiflux, nome_tecnico_tiflux)
     resumo_anexos = _sincronizar_anexos(glpi, tiflux, config, id_chamado, ticket_number_tiflux)
 
+    texto_tecnico = f"Técnico {nome_tecnico_tiflux}" if nome_tecnico_tiflux else "Sem técnico atribuído"
     msg = (f"Ticket #{ticket_number_tiflux} criado no Tiflux | Mesa {mesa_tiflux} | "
            f"Prioridade ID {id_prioridade_tiflux} | "
-           f"Técnico {nome_tecnico_tiflux} | Solicitante {info_solicitante_tiflux}"
+           f"{texto_tecnico} | Solicitante {info_solicitante_tiflux}"
            f"{resumo_anexos}")
     return "sucesso", ticket_number_tiflux, msg
 

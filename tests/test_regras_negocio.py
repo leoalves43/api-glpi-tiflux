@@ -45,10 +45,10 @@ class TestDefinirTecnico(unittest.TestCase):
         id_tecnico, nome = definir_tecnico(37964, _CONFIG_TESTE)
         self.assertEqual((id_tecnico, nome), (_CONFIG_TESTE.id_tecnico_leo, "Léo Alves"))
 
-    def test_qualquer_outra_mesa_vai_para_sania(self):
+    def test_qualquer_outra_mesa_fica_sem_tecnico(self):
         for mesa in (37963, 37965, 37966):
             id_tecnico, nome = definir_tecnico(mesa, _CONFIG_TESTE)
-            self.assertEqual((id_tecnico, nome), (_CONFIG_TESTE.id_tecnico_sania, "Sânia Almeida"))
+            self.assertEqual((id_tecnico, nome), (None, None))
 
 
 class TestDefinirPrioridade(unittest.TestCase):
