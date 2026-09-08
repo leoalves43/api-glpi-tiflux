@@ -1,4 +1,5 @@
 import requests
+import urllib.parse
 
 # 1. TOKENS E CREDENCIAIS
 credenciais = {}
@@ -28,42 +29,50 @@ headers_tiflux_json = {
     "Authorization": f"Bearer {TOKEN_TIFLUX}"
 }
 
-# FUNÇÃO PARA CADASTRAR SOLICITANTE NO TIFLUX CASO NÃO EXISTA
+# FUNÇÃO PARA CADASTRAR SOLICITANTE (REQUESTOR) NO TIFLUX CASO NÃO EXISTA
 def cadastrar_solicitante_tiflux(nome, email):
-    url_criar = f"{URL_TIFLUX}/clients/{CLIENTE_TIFLUX_ID}/users"
+    url_criar = f"{URL_TIFLUX}/clients/{CLIENTE_TIFLUX_ID}/requestors"
     payload = {
-        "user": {
-            "name": nome if nome != "Desconhecido" else "Solicitante Sem Nome",
-            "email": email
-        }
+        "name": nome if nome != "Desconhecido" else "Solicitante Sem Nome",
+        "email": email,
+        "can_open_ticket": True
     }
-    
+
     resp = requests.post(url_criar, json=payload, headers=headers_tiflux_json)
-    if resp.status_code == 201:
-        dados = resp.json().get("user", {})
+    if resp.status_code in [200, 201]:
+        dados = resp.json()
+        # A criação de requestor retorna o objeto direto na raiz (sem envelope "user")
         return dados.get("id"), f"{dados.get('name')} (Cadastrado Automaticamente via API)"
-    
+
+    print(f"⚠️ Falha ao cadastrar solicitante ({resp.status_code}): {resp.text}")
     return ID_SOLICITANTE_PADRAO, "Ju STII (Padrão - Falha ao Auto-Cadastrar no TiFlux)"
 
-# BUSCAR SOLICITANTE POR E-MAIL OU AUTO-CADASTRAR
+# BUSCAR SOLICITANTE (REQUESTOR) POR E-MAIL, RESTRITO AO CLIENTE
 def obter_id_solicitante_tiflux(nome_glpi, email_glpi):
     if not email_glpi:
         return ID_SOLICITANTE_PADRAO, "Ju STII (Padrão - Sem E-mail no GLPI)"
-    
-    url_busca = f"{URL_TIFLUX}/clients/{CLIENTE_TIFLUX_ID}/requestors?email={email_glpi.strip()}"
+
+    email_limpo = email_glpi.strip().lower()
+    email_encoded = urllib.parse.quote(email_limpo)
+
+    # Rota correta: /requestors (não /users). O filtro "email" é por
+    # correspondência parcial ("contém"), então ainda validamos o valor exato abaixo.
+    url_busca = f"{URL_TIFLUX}/clients/{CLIENTE_TIFLUX_ID}/requestors?email={email_encoded}"
     resposta = requests.get(url_busca, headers=headers_tiflux_json)
-    
+
     if resposta.status_code == 200:
         dados = resposta.json()
-        
+
         if isinstance(dados, list) and len(dados) > 0:
-            dados_ordenados = sorted(dados, key=lambda x: x.get("id", 0), reverse=True)
-            solicitante_mais_recente = dados_ordenados[0]
-            return solicitante_mais_recente.get("id"), f"{solicitante_mais_recente.get('name')} (Existente - ID: {solicitante_mais_recente.get('id')})"
-            
-        elif isinstance(dados, dict) and dados.get("id"):
-            return dados.get("id"), f"{dados.get('name')} (Existente via E-mail)"
-            
+            for item in dados:
+                if str(item.get("email", "")).strip().lower() == email_limpo:
+                    return item.get("id"), f"{item.get('name')} (Existente no TiFlux - ID: {item.get('id')})"
+            # Nenhum bateu exatamente: não assume o primeiro da lista (pode ser
+            # outro solicitante cujo e-mail apenas contém o termo buscado)
+    elif resposta.status_code != 404:
+        print(f"⚠️ Busca de solicitante retornou status inesperado ({resposta.status_code}): {resposta.text}")
+
+    # Fallback apenas se não encontrou correspondência exata
     return cadastrar_solicitante_tiflux(nome_glpi, email_glpi)
 
 # 2. AUTENTICAÇÃO NO GLPI
@@ -83,7 +92,7 @@ if resposta.status_code == 200:
     }
 
     # 3. ID do chamado para teste
-    ID_CHAMADO_TESTE = 27513
+    ID_CHAMADO_TESTE = 27514
     
     print(f"Buscando informações do chamado #{ID_CHAMADO_TESTE} no GLPI...\n")
     resp_ticket = requests.get(f"{URL_BASE}/Ticket/{ID_CHAMADO_TESTE}", headers=headers_glpi)
@@ -97,25 +106,41 @@ if resposta.status_code == 200:
         prioridade_glpi = ticket.get("priority")
         categoria_glpi = ticket.get("itilcategories_id")
         
-        # Extraindo dados e e-mail do solicitante no GLPI
-        id_usuario_glpi = ticket.get("users_id_recipient")
+        # BUSCA DE REQUERENTE NO GLPI
         nome_solicitante_glpi = "Desconhecido"
         email_solicitante_glpi = None
+        id_requerente = None
         
-        if id_usuario_glpi:
-            resp_usuario = requests.get(f"{URL_BASE}/User/{id_usuario_glpi}", headers=headers_glpi)
+        # 1. Filtra no Ticket_User pelo Type == 1 (Requerente)
+        resp_vinculos = requests.get(f"{URL_BASE}/Ticket/{ID_CHAMADO_TESTE}/Ticket_User", headers=headers_glpi)
+        if resp_vinculos.status_code in [200, 206]:
+            for v in resp_vinculos.json():
+                if v.get("type") == 1:
+                    id_requerente = v.get("users_id")
+                    break
+
+        if not id_requerente:
+            id_requerente = ticket.get("users_id_recipient") or ticket.get("users_id_lastupdater")
+
+        # 2. Pega dados e e-mails do usuário
+        if id_requerente:
+            resp_usuario = requests.get(f"{URL_BASE}/User/{id_requerente}", headers=headers_glpi)
             if resp_usuario.status_code in [200, 206]:
                 dados_usuario = resp_usuario.json()
-                primeiro_nome = dados_usuario.get("firstname", "")
-                sobrenome = dados_usuario.get("realname", "")
-                login_usuario = dados_usuario.get("name", "")
+                p_nome = dados_usuario.get("firstname", "")
+                s_nome = dados_usuario.get("realname", "")
+                login = dados_usuario.get("name", "")
                 
+                nome_solicitante_glpi = f"{p_nome} {s_nome}".strip() if (p_nome or s_nome) else f"Login: {login}"
                 email_solicitante_glpi = dados_usuario.get("email")
-                
-                if primeiro_nome or sobrenome:
-                    nome_solicitante_glpi = f"{primeiro_nome} {sobrenome}".strip()
-                else:
-                    nome_solicitante_glpi = f"Login: {login_usuario}"
+
+            # 3. Consulta rota /UserEmail se o e-mail principal for nulo
+            if not email_solicitante_glpi:
+                resp_email = requests.get(f"{URL_BASE}/User/{id_requerente}/UserEmail", headers=headers_glpi)
+                if resp_email.status_code in [200, 206]:
+                    lista_emails = resp_email.json()
+                    if isinstance(lista_emails, list) and len(lista_emails) > 0:
+                        email_solicitante_glpi = lista_emails[0].get("email")
 
         # Mapeamento de Categoria GLPI -> Mesa TiFlux
         def depara_categoria(cat_id):
@@ -152,8 +177,12 @@ if resposta.status_code == 200:
         prioridade_glpi_texto = mapa_prioridades.get(prioridade_glpi, "Normal")
         
         titulo_tiflux = f"{titulo_glpi} ({id_glpi})"
-        cabecalho_personalizado = f"Este chamado tem a prioridade: {prioridade_glpi_texto}<br><br>"
-        descricao_tiflux = cabecalho_personalizado + descricao_glpi
+        
+        # Formatação do corpo da descrição
+        cabecalho_personalizado = f"Este chamado tem a prioridade: {prioridade_glpi_texto}"
+        info_solicitante_texto = f"Solicitante: {nome_solicitante_glpi} <{email_solicitante_glpi if email_solicitante_glpi else 'Sem e-mail'}>"
+        
+        descricao_tiflux = f"{cabecalho_personalizado}<br><br>{info_solicitante_texto}<br><br>Descrição:<br>{descricao_glpi}"
         
         # EXIBIÇÃO DO PACOTE TRADUZIDO
         print("=" * 80)
@@ -193,7 +222,6 @@ if resposta.status_code == 200:
         if resp_criacao.status_code in [200, 201]:
             dados_retorno = resp_criacao.json()
             
-            # Pega o 'ticket_number' diretamente de dentro do objeto 'ticket'
             ticket_number_tiflux = None
             if isinstance(dados_retorno, dict) and "ticket" in dados_retorno:
                 ticket_number_tiflux = dados_retorno["ticket"].get("ticket_number")
@@ -204,14 +232,12 @@ if resposta.status_code == 200:
             if ticket_number_tiflux:
                 print(f"👤 Atribuindo técnico {nome_tecnico_tiflux} (ID: {id_tecnico_tiflux}) ao chamado #{ticket_number_tiflux}...")
                 
-                # Rota dedicada de alteração de responsável pelo ticket_number
                 url_alterar_responsavel = f"{URL_TIFLUX}/tickets/{ticket_number_tiflux}/change_responsible"
                 payload_resp = {"responsible_id": id_tecnico_tiflux}
                 
                 resp_update = requests.post(url_alterar_responsavel, json=payload_resp, headers=headers_tiflux_json)
                 
                 if resp_update.status_code not in [200, 201, 204]:
-                    # Tentativa alternativa via PUT caso a rota post não responda 200
                     url_put = f"{URL_TIFLUX}/tickets/{ticket_number_tiflux}"
                     payload_put = {"ticket": {"responsible_id": id_tecnico_tiflux}}
                     resp_update = requests.put(url_put, json=payload_put, headers=headers_tiflux_json)
