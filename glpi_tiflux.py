@@ -10,8 +10,12 @@ Feito para rodar via cron. Cada execução:
      anteriores (retry automático).
   4. Para cada chamado: monta o pacote, cria no Tiflux, atribui o técnico,
      e grava o resultado (sucesso ou erro) na tabela de auditoria.
+  5. Sincroniza followups (GLPI <-> Tiflux) de uma leva de chamados já
+     sincronizados: publica followups novos do GLPI como resposta/comunicação
+     interna no Tiflux, e respostas/comunicações internas novas do Tiflux como
+     followup no GLPI. Só varre chamados ainda abertos no GLPI.
 
-Tabela de auditoria: ver criar_tabela_auditoria.sql
+Tabelas de auditoria: ver criar_tabela_auditoria.sql
 """
 
 import html
@@ -56,11 +60,21 @@ DB_SCHEMA = CRED.get("DB_SCHEMA", "public")
 DB_TABLE = CRED.get("DB_TABLE", "api_glpi_tiflux")
 TABELA_AUDITORIA = f"{DB_SCHEMA}.{DB_TABLE}"
 
+DB_TABLE_FOLLOWUPS = CRED.get("DB_TABLE_FOLLOWUPS", "api_glpi_tiflux_followups")
+TABELA_FOLLOWUPS = f"{DB_SCHEMA}.{DB_TABLE_FOLLOWUPS}"
+
 # Regra de negócio: só processar chamados a partir deste número
 ID_MINIMO_GLPI = 33637
 
 # Quantos chamados buscar por execução do cron (aumente se ficar tickets p/ trás)
 TAMANHO_PAGINA_BUSCA = 200
+
+# Quantos chamados já sincronizados varrer por execução em busca de followups novos
+TAMANHO_PAGINA_FOLLOWUPS = 50
+
+# Paginação ao listar respostas/comunicações internas de um ticket no Tiflux
+TAMANHO_PAGINA_RESPOSTAS_TIFLUX = 100
+MAX_PAGINAS_RESPOSTAS_TIFLUX = 20  # limite de segurança
 
 CLIENTE_TIFLUX_ID = 762707
 ID_SOLICITANTE_PADRAO = 3758056  # Ju STII
@@ -157,6 +171,111 @@ def registrar_resultado(conn, id_glpi, numero_tiflux, status, mensagem):
     conn.commit()
 
 
+def obter_chamados_para_varrer_followups(conn, limite=TAMANHO_PAGINA_FOLLOWUPS):
+    """
+    Retorna até `limite` pares (id_glpi, numero_tiflux) de chamados já
+    sincronizados com sucesso, para varrer em busca de followups novos.
+    Só considera chamados com status='sucesso' na tabela de auditoria de
+    chamados — linhas 'erro' podem ter numero_tiflux inconsistente (ver bug
+    conhecido de duplicação no reprocessamento de falha de atribuição de
+    técnico, em processar_chamado()).
+    Prioriza os chamados menos recentemente varridos (LEFT JOIN pelo timestamp
+    mais recente na tabela de followups), pra fazer um rodízio justo entre
+    execuções do cron.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT t.id_glpi, t.numero_tiflux
+            FROM {TABELA_AUDITORIA} t
+            LEFT JOIN (
+                SELECT id_glpi, MAX(atualizado_em) AS ultima_varredura
+                FROM {TABELA_FOLLOWUPS}
+                GROUP BY id_glpi
+            ) f ON f.id_glpi = t.id_glpi
+            WHERE t.status = 'sucesso'
+            ORDER BY f.ultima_varredura ASC NULLS FIRST
+            LIMIT %s
+            """,
+            (limite,),
+        )
+        return cur.fetchall()
+
+
+def obter_followups_glpi_ja_processados(conn, id_glpi):
+    """
+    IDs de ITILFollowup do GLPI já publicados com sucesso no Tiflux para este
+    chamado. Só considera status='sucesso' (mesmo critério de
+    obter_ids_ja_processados p/ chamados) — um followup que falhou fica de
+    fora daqui de propósito, pra ser retentado na próxima execução.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id_origem FROM {TABELA_FOLLOWUPS} "
+            f"WHERE direcao = 'glpi_para_tiflux' AND status = 'sucesso' AND id_glpi = %s",
+            (id_glpi,),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
+def obter_respostas_tiflux_ja_processadas_ou_proprias(conn, numero_tiflux):
+    """
+    IDs de resposta/comunicação interna do Tiflux a IGNORAR na varredura
+    Tiflux -> GLPI: os que já processamos com sucesso nesse sentido (direcao=
+    'tiflux_para_glpi', status='sucesso' — followups com erro ficam de fora
+    de propósito, pra serem retentados) UNION os que a própria integração
+    criou no sentido glpi_para_tiflux (id_destino, só existe em linhas de
+    sucesso) — evita reimportar o próprio eco.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT id_origem FROM {TABELA_FOLLOWUPS}
+            WHERE numero_tiflux = %s AND direcao = 'tiflux_para_glpi' AND status = 'sucesso'
+            UNION
+            SELECT id_destino FROM {TABELA_FOLLOWUPS}
+            WHERE numero_tiflux = %s AND direcao = 'glpi_para_tiflux' AND id_destino IS NOT NULL
+            """,
+            (numero_tiflux, numero_tiflux),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
+def registrar_resultado_followup(conn, id_glpi, numero_tiflux, direcao, tipo, id_origem, id_destino, status, mensagem):
+    """Grava (ou atualiza, em caso de retry) o resultado da sincronização de um followup."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            INSERT INTO {TABELA_FOLLOWUPS}
+                (id_glpi, numero_tiflux, direcao, tipo, id_origem, id_destino, status, mensagem, tentativas, criado_em, atualizado_em)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, now(), now())
+            ON CONFLICT (direcao, id_origem) DO UPDATE SET
+                numero_tiflux = EXCLUDED.numero_tiflux,
+                id_destino    = EXCLUDED.id_destino,
+                status        = EXCLUDED.status,
+                mensagem      = EXCLUDED.mensagem,
+                tentativas    = {TABELA_FOLLOWUPS}.tentativas + 1,
+                atualizado_em = now()
+            """,
+            (id_glpi, numero_tiflux, direcao, tipo, id_origem, id_destino, status, mensagem),
+        )
+    conn.commit()
+
+
+def registrar_chamado_fechado_para_followups(conn, id_glpi):
+    """
+    Marca (sem sincronizar nenhum followup) que este chamado foi conferido e
+    está fechado no GLPI. Sem isso, um chamado fechado nunca ganharia uma
+    linha na tabela de followups e ficaria pra sempre em primeiro lugar no
+    rodízio de obter_chamados_para_varrer_followups (que ordena por última
+    varredura), monopolizando o limite de chamados verificados por execução.
+    """
+    registrar_resultado_followup(
+        conn, id_glpi, None, "verificacao_status", "status", -id_glpi, None,
+        "fechado", "Chamado fechado no GLPI — fora do escopo da varredura de followups",
+    )
+
+
 # =============================================================================
 # 3. GLPI — AUTENTICAÇÃO E BUSCA DE CHAMADOS
 # =============================================================================
@@ -217,6 +336,45 @@ def buscar_chamados_desde(headers_glpi, id_inicial, limite_por_execucao=TAMANHO_
 
     log(f"🔎 Sondagem de #{id_inicial} até #{id_atual - 1}: {len(encontrados)} chamado(s) encontrado(s)")
     return encontrados
+
+
+def obter_followups_glpi(headers_glpi, id_chamado):
+    """
+    GET /Ticket/{id}/ITILFollowup — lista os followups (públicos e privados)
+    do chamado. Retorna lista de dicts crus do GLPI, ou [] em caso de erro
+    (loga aviso, não levanta).
+    """
+    resp = requests.get(f"{URL_BASE}/Ticket/{id_chamado}/ITILFollowup", headers=headers_glpi)
+    if resp.status_code not in (200, 206):
+        log(f"⚠️ Falha ao buscar followups do chamado #{id_chamado} no GLPI (status {resp.status_code}): {resp.text}")
+        return []
+    dados = resp.json()
+    return dados if isinstance(dados, list) else []
+
+
+def criar_followup_glpi(headers_glpi, id_chamado, conteudo_html, is_private=0):
+    """
+    POST /ITILFollowup, usando o "input wrapper" padrão do GLPI pra criação de
+    itens. Retorna (id_criado, erro_ou_None).
+    """
+    payload = {
+        "input": {
+            "itemtype": "Ticket",
+            "items_id": id_chamado,
+            "content": conteudo_html,
+            "is_private": is_private,
+        }
+    }
+    resp = requests.post(f"{URL_BASE}/ITILFollowup", json=payload, headers=headers_glpi)
+    if resp.status_code not in (200, 201):
+        return None, f"Falha ao criar followup no GLPI ({resp.status_code}): {resp.text}"
+
+    dados = resp.json()
+    id_criado = dados.get("id") if isinstance(dados, dict) else None
+    if not id_criado:
+        return None, "Followup criado no GLPI, mas não foi possível identificar o id na resposta"
+
+    return id_criado, None
 
 
 # =============================================================================
@@ -402,7 +560,12 @@ def obter_requerente_glpi(headers_glpi, id_chamado, ticket):
                 if isinstance(lista_emails, list) and lista_emails:
                     email_solicitante = lista_emails[0].get("email")
 
-    return nome_solicitante, email_solicitante
+    return nome_solicitante, email_solicitante, id_requerente
+
+
+def autor_e_solicitante(id_autor_followup, id_requerente_ticket):
+    """Compara o autor de um followup do GLPI ao requerente do chamado (já resolvido por obter_requerente_glpi)."""
+    return id_requerente_ticket is not None and id_autor_followup == id_requerente_ticket
 
 
 def chamado_tem_grupo_observador(headers_glpi, id_chamado):
@@ -537,7 +700,7 @@ def processar_chamado(headers_glpi, id_chamado):
         prioridade_glpi = ticket.get("priority")
         categoria_glpi = ticket.get("itilcategories_id")
 
-        nome_solicitante_glpi, email_solicitante_glpi = obter_requerente_glpi(headers_glpi, id_chamado, ticket)
+        nome_solicitante_glpi, email_solicitante_glpi, _ = obter_requerente_glpi(headers_glpi, id_chamado, ticket)
 
         mesa_tiflux = depara_categoria(categoria_glpi)
 
@@ -635,6 +798,234 @@ def processar_chamado(headers_glpi, id_chamado):
 
 
 # =============================================================================
+# 5B. SINCRONIZAÇÃO DE FOLLOWUPS (GLPI <-> TIFLUX)
+# =============================================================================
+
+def sincronizar_followups_glpi_para_tiflux(conn, headers_glpi, id_chamado, numero_tiflux):
+    """
+    Busca followups do chamado no GLPI, filtra os que ainda não foram
+    publicados no Tiflux, e cria cada um lá:
+      - is_private=1                    -> POST /internal_communications
+      - público, autor é o requerente   -> POST /client-answers
+      - público, autor é outra pessoa   -> POST /answers (como agente)
+    Conteúdo (HTML) é passado direto — confirmado que o Tiflux aceita/renderiza
+    HTML nesses campos, ao contrário da descrição do ticket (ver html_para_texto_plano).
+    Retorna (qtd_sucesso, qtd_erro).
+    """
+    followups = obter_followups_glpi(headers_glpi, id_chamado)
+    if not followups:
+        return 0, 0
+
+    ja_processados = obter_followups_glpi_ja_processados(conn, id_chamado)
+    pendentes = [f for f in followups if f.get("id") not in ja_processados]
+    if not pendentes:
+        return 0, 0
+
+    resp_ticket = requests.get(f"{URL_BASE}/Ticket/{id_chamado}", headers=headers_glpi)
+    ticket = resp_ticket.json() if resp_ticket.status_code in (200, 206) else {}
+    nome_requerente, _, id_requerente_ticket = obter_requerente_glpi(headers_glpi, id_chamado, ticket)
+
+    qtd_sucesso = 0
+    qtd_erro = 0
+
+    for followup in pendentes:
+        id_origem = followup.get("id")
+        # Alguns followups do GLPI vêm com o conteúdo HTML-entity-encoded
+        # (ex.: "&#60;p&#62;texto&#60;/p&#62;" em vez de "<p>texto</p>"),
+        # dependendo de como foram criados; html.unescape() normaliza pros
+        # dois casos (é um no-op se o conteúdo já vier como HTML literal).
+        conteudo = html.unescape(followup.get("content") or "")
+        is_private = bool(followup.get("is_private"))
+        id_autor = followup.get("users_id")
+
+        # IMPORTANTE: esses três endpoints exigem multipart/form-data de verdade
+        # (confirmado ao vivo — /internal_communications rejeita com 415 se o
+        # body vier como application/x-www-form-urlencoded). requests só monta
+        # multipart de fato com o parâmetro files=; o truque (None, valor) força
+        # isso sem precisar de um arquivo real, igual ao já usado em enviar_anexos_tiflux.
+        if is_private:
+            tipo = "interna"
+            resp = requests.post(
+                f"{URL_TIFLUX}/tickets/{numero_tiflux}/internal_communications",
+                files={"text": (None, conteudo)},
+                headers=headers_tiflux_get,
+            )
+        elif autor_e_solicitante(id_autor, id_requerente_ticket):
+            tipo = "publica"
+            resp = requests.post(
+                f"{URL_TIFLUX}/tickets/{numero_tiflux}/client-answers",
+                files={"name": (None, conteudo), "author_name": (None, nome_requerente)},
+                headers=headers_tiflux_get,
+            )
+        else:
+            tipo = "publica"
+            resp = requests.post(
+                f"{URL_TIFLUX}/tickets/{numero_tiflux}/answers",
+                files={"name": (None, conteudo)},
+                headers=headers_tiflux_get,
+            )
+
+        if resp.status_code not in (200, 201):
+            qtd_erro += 1
+            registrar_resultado_followup(
+                conn, id_chamado, numero_tiflux, "glpi_para_tiflux", tipo, id_origem, None,
+                "erro", f"Falha ao publicar followup no Tiflux ({resp.status_code}): {resp.text}",
+            )
+            continue
+
+        id_destino = resp.json().get("id")
+        if not id_destino:
+            qtd_erro += 1
+            registrar_resultado_followup(
+                conn, id_chamado, numero_tiflux, "glpi_para_tiflux", tipo, id_origem, None,
+                "erro", "Followup publicado no Tiflux, mas não foi possível identificar o id na resposta",
+            )
+            continue
+
+        qtd_sucesso += 1
+        registrar_resultado_followup(
+            conn, id_chamado, numero_tiflux, "glpi_para_tiflux", tipo, id_origem, id_destino,
+            "sucesso", f"Followup GLPI #{id_origem} publicado no Tiflux (id {id_destino})",
+        )
+
+    return qtd_sucesso, qtd_erro
+
+
+def _listar_respostas_tiflux(endpoint, numero_tiflux):
+    """
+    Pagina um endpoint de resposta/comunicação do Tiflux (offset = número da
+    página, não deslocamento de linha — ver doc da API) e retorna todos os itens.
+    """
+    itens = []
+    pagina = 1
+    while pagina <= MAX_PAGINAS_RESPOSTAS_TIFLUX:
+        resp = requests.get(
+            f"{URL_TIFLUX}/tickets/{numero_tiflux}/{endpoint}",
+            params={"offset": pagina, "limit": TAMANHO_PAGINA_RESPOSTAS_TIFLUX},
+            headers=headers_tiflux_get,
+        )
+        if resp.status_code != 200:
+            log(f"⚠️ Falha ao listar {endpoint} do ticket Tiflux #{numero_tiflux} (status {resp.status_code}): {resp.text}")
+            break
+
+        pagina_itens = resp.json()
+        if not isinstance(pagina_itens, list) or not pagina_itens:
+            break
+
+        itens.extend(pagina_itens)
+        if len(pagina_itens) < TAMANHO_PAGINA_RESPOSTAS_TIFLUX:
+            break
+        pagina += 1
+
+    return itens
+
+
+def sincronizar_followups_tiflux_para_glpi(conn, headers_glpi, id_chamado, numero_tiflux):
+    """
+    Busca respostas públicas (/answers) e comunicações internas
+    (/internal_communications) do ticket no Tiflux, filtra as que ainda não
+    foram sincronizadas ou que a própria integração criou (eco), e cria um
+    followup correspondente no GLPI pra cada uma.
+
+    Defesa contra eco: a tabela de auditoria (id já processado ou já criado por
+    nós) é o mecanismo primário, único disponível pra /internal_communications.
+    Pra /answers, o campo answer_origin/author (só existe nesse endpoint) serve
+    de defesa adicional.
+    Retorna (qtd_sucesso, qtd_erro).
+    """
+    ja_processados_ou_proprios = obter_respostas_tiflux_ja_processadas_ou_proprias(conn, numero_tiflux)
+
+    respostas = _listar_respostas_tiflux("answers", numero_tiflux)
+    comunicacoes = _listar_respostas_tiflux("internal_communications", numero_tiflux)
+
+    qtd_sucesso = 0
+    qtd_erro = 0
+
+    for resposta in respostas:
+        id_origem = resposta.get("id")
+        if id_origem in ja_processados_ou_proprios:
+            continue
+        if resposta.get("answer_origin") == "api" or str(resposta.get("author", "")).startswith("[API]"):
+            continue
+
+        conteudo = html.unescape(resposta.get("name") or "")
+        id_criado, erro = criar_followup_glpi(headers_glpi, id_chamado, conteudo, is_private=0)
+        if erro:
+            qtd_erro += 1
+            registrar_resultado_followup(
+                conn, id_chamado, numero_tiflux, "tiflux_para_glpi", "publica", id_origem, None, "erro", erro,
+            )
+        else:
+            qtd_sucesso += 1
+            registrar_resultado_followup(
+                conn, id_chamado, numero_tiflux, "tiflux_para_glpi", "publica", id_origem, id_criado,
+                "sucesso", f"Resposta Tiflux #{id_origem} publicada como followup no GLPI (id {id_criado})",
+            )
+
+    for comunicacao in comunicacoes:
+        id_origem = comunicacao.get("id")
+        if id_origem in ja_processados_ou_proprios:
+            continue
+
+        conteudo = html.unescape(comunicacao.get("text") or "")
+        id_criado, erro = criar_followup_glpi(headers_glpi, id_chamado, conteudo, is_private=1)
+        if erro:
+            qtd_erro += 1
+            registrar_resultado_followup(
+                conn, id_chamado, numero_tiflux, "tiflux_para_glpi", "interna", id_origem, None, "erro", erro,
+            )
+        else:
+            qtd_sucesso += 1
+            registrar_resultado_followup(
+                conn, id_chamado, numero_tiflux, "tiflux_para_glpi", "interna", id_origem, id_criado,
+                "sucesso", f"Comunicação interna Tiflux #{id_origem} publicada como followup privado no GLPI (id {id_criado})",
+            )
+
+    return qtd_sucesso, qtd_erro
+
+
+def sincronizar_followups(conn, headers_glpi):
+    """
+    Percorre uma leva de chamados já sincronizados (obter_chamados_para_varrer_followups),
+    ignora os que já estão fechados no GLPI (fora do escopo desta varredura,
+    mas marcados via registrar_chamado_fechado_para_followups pra não travar o
+    rodízio), e sincroniza followups nos dois sentidos pros demais.
+    """
+    chamados = obter_chamados_para_varrer_followups(conn)
+    if not chamados:
+        return
+
+    total_g2t_sucesso = total_g2t_erro = 0
+    total_t2g_sucesso = total_t2g_erro = 0
+
+    for id_glpi, numero_tiflux in chamados:
+        if not numero_tiflux:
+            continue
+
+        resp_ticket = requests.get(f"{URL_BASE}/Ticket/{id_glpi}", headers=headers_glpi)
+        if resp_ticket.status_code not in (200, 206):
+            log(f"⚠️ Não foi possível conferir status do chamado #{id_glpi} no GLPI "
+                f"(status {resp_ticket.status_code}) — pulado nesta execução")
+            continue
+
+        status_glpi = resp_ticket.json().get("status")
+        if status_glpi not in (1, 2, 3, 4):  # não está mais "aberto" (Novo/Processando/Pendente)
+            registrar_chamado_fechado_para_followups(conn, id_glpi)
+            continue
+
+        s, e = sincronizar_followups_glpi_para_tiflux(conn, headers_glpi, id_glpi, numero_tiflux)
+        total_g2t_sucesso += s
+        total_g2t_erro += e
+
+        s, e = sincronizar_followups_tiflux_para_glpi(conn, headers_glpi, id_glpi, numero_tiflux)
+        total_t2g_sucesso += s
+        total_t2g_erro += e
+
+    log(f"Followups. GLPI->Tiflux: {total_g2t_sucesso} ok / {total_g2t_erro} erro | "
+        f"Tiflux->GLPI: {total_t2g_sucesso} ok / {total_t2g_erro} erro")
+
+
+# =============================================================================
 # 6. MAIN
 # =============================================================================
 
@@ -669,31 +1060,35 @@ def main():
         candidatos = sorted(set(ids_novos) | ids_retry)
 
         if not candidatos:
-            log("Nenhum chamado novo ou pendente de retry. Nada a fazer.")
-            return
+            log("Nenhum chamado novo ou pendente de retry.")
+        else:
+            log(f"{len(candidatos)} chamado(s) para processar: {candidatos}")
 
-        log(f"{len(candidatos)} chamado(s) para processar: {candidatos}")
+            total_sucesso = 0
+            total_ignorado = 0
+            total_erro = 0
+            for id_chamado in candidatos:
+                status, numero_tiflux, mensagem = processar_chamado(headers_glpi, id_chamado)
 
-        total_sucesso = 0
-        total_ignorado = 0
-        total_erro = 0
-        for id_chamado in candidatos:
-            status, numero_tiflux, mensagem = processar_chamado(headers_glpi, id_chamado)
+                if status == "sucesso":
+                    total_sucesso += 1
+                    registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
+                    log(f"✅ Chamado #{id_chamado}: {mensagem}")
+                elif status == "ignorado":
+                    total_ignorado += 1
+                    # Não interessa: nem grava na auditoria, nem loga por chamado —
+                    # só entra na contagem final abaixo.
+                else:
+                    total_erro += 1
+                    registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
+                    log(f"❌ Chamado #{id_chamado}: {mensagem}")
 
-            if status == "sucesso":
-                total_sucesso += 1
-                registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
-                log(f"✅ Chamado #{id_chamado}: {mensagem}")
-            elif status == "ignorado":
-                total_ignorado += 1
-                # Não interessa: nem grava na auditoria, nem loga por chamado —
-                # só entra na contagem final abaixo.
-            else:
-                total_erro += 1
-                registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
-                log(f"❌ Chamado #{id_chamado}: {mensagem}")
+            log(f"Finalizado. Sucesso: {total_sucesso} | Ignorado: {total_ignorado} | Erro: {total_erro}")
 
-        log(f"Finalizado. Sucesso: {total_sucesso} | Ignorado: {total_ignorado} | Erro: {total_erro}")
+        # Followups (GLPI <-> Tiflux) dos chamados já sincronizados — roda sempre,
+        # mesmo sem chamados novos acima, e já pega chamados criados nesta mesma
+        # execução em vez de esperar o próximo ciclo do cron.
+        sincronizar_followups(conn, headers_glpi)
 
     finally:
         encerrar_sessao_glpi(headers_glpi)
