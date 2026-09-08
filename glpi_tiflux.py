@@ -14,9 +14,11 @@ Feito para rodar via cron. Cada execução:
 Tabela de auditoria: ver criar_tabela_auditoria.sql
 """
 
+import html
 import sys
 import urllib.parse
 from datetime import datetime
+from html.parser import HTMLParser
 
 import psycopg2
 import psycopg2.extras
@@ -106,9 +108,13 @@ def conectar_db():
 
 
 def obter_ids_ja_processados(conn):
-    """IDs que já têm um resultado final (sucesso ou ignorado) e não devem ser reprocessados."""
+    """
+    IDs que já têm um resultado de sucesso gravado e não devem ser reprocessados.
+    Chamados 'ignorado' (sem o grupo observador) não são gravados na auditoria,
+    então não entram aqui — a sondagem vai re-conferir esses IDs a cada execução.
+    """
     with conn.cursor() as cur:
-        cur.execute(f"SELECT id_glpi FROM {TABELA_AUDITORIA} WHERE status IN ('sucesso', 'ignorado')")
+        cur.execute(f"SELECT id_glpi FROM {TABELA_AUDITORIA} WHERE status = 'sucesso'")
         return {row[0] for row in cur.fetchall()}
 
 
@@ -216,6 +222,51 @@ def buscar_chamados_desde(headers_glpi, id_inicial, limite_por_execucao=TAMANHO_
 # =============================================================================
 # 4. TRADUÇÃO GLPI -> TIFLUX (regras de negócio)
 # =============================================================================
+
+class _HTMLParaTexto(HTMLParser):
+    """Extrai texto puro de um HTML, preservando quebras de linha e listas."""
+
+    _TAGS_QUEBRA_LINHA = {"p", "div", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "ol", "ul"}
+
+    def __init__(self):
+        super().__init__()
+        self.partes = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "br":
+            self.partes.append("\n")
+        elif tag == "li":
+            self.partes.append("\n- ")
+
+    def handle_endtag(self, tag):
+        if tag in self._TAGS_QUEBRA_LINHA:
+            self.partes.append("\n")
+
+    def handle_data(self, data):
+        self.partes.append(data)
+
+
+def html_para_texto_plano(conteudo_html):
+    """
+    O campo de descrição do Tiflux é TEXTO PURO, não renderiza HTML — mandar as
+    tags do GLPI direto faz elas aparecerem literalmente pro atendente. Essa
+    função extrai só o texto, mantendo parágrafos/quebras de linha/listas legíveis.
+    """
+    if not conteudo_html:
+        return ""
+
+    parser = _HTMLParaTexto()
+    parser.feed(conteudo_html)
+    texto = "".join(parser.partes)
+    texto = html.unescape(texto)
+
+    linhas = [linha.strip() for linha in texto.splitlines()]
+    texto = "\n".join(linhas)
+    while "\n\n\n" in texto:
+        texto = texto.replace("\n\n\n", "\n\n")
+
+    return texto.strip()
+
 
 def depara_categoria(cat_id):
     """
@@ -371,6 +422,91 @@ def chamado_tem_grupo_observador(headers_glpi, id_chamado):
     return False, f"Chamado não tem o grupo observador ID {ID_GRUPO_OBSERVADOR}"
 
 
+# Tamanho máximo de anexo aceito pelo Tiflux
+TAMANHO_MAXIMO_ANEXO_MB = 25
+
+
+def obter_anexos_glpi(headers_glpi, id_chamado):
+    """
+    Busca os documentos vinculados ao chamado no GLPI (anexos e imagens
+    inseridas na descrição) e baixa o conteúdo binário de cada um.
+    Retorna (lista_de_anexos, avisos) onde cada anexo é (nome, conteudo_bytes, mime)
+    e avisos é uma lista de strings com o que não pôde ser baixado/enviado.
+    """
+    anexos = []
+    avisos = []
+
+    resp = requests.get(f"{URL_BASE}/Ticket/{id_chamado}/Document_Item", headers=headers_glpi)
+    if resp.status_code not in (200, 206):
+        avisos.append(f"Falha ao listar anexos do chamado no GLPI (status {resp.status_code})")
+        return anexos, avisos
+
+    vinculos = resp.json()
+    if not isinstance(vinculos, list) or not vinculos:
+        return anexos, avisos
+
+    for vinculo in vinculos:
+        doc_id = vinculo.get("documents_id")
+        if not doc_id:
+            continue
+
+        resp_doc = requests.get(f"{URL_BASE}/Document/{doc_id}", headers=headers_glpi)
+        if resp_doc.status_code not in (200, 206):
+            avisos.append(f"Documento {doc_id}: falha ao obter metadados (status {resp_doc.status_code})")
+            continue
+        meta = resp_doc.json()
+        nome_arquivo = meta.get("filename") or meta.get("name") or f"arquivo_{doc_id}"
+        mime = meta.get("mime") or "application/octet-stream"
+
+        resp_bin = requests.get(
+            f"{URL_BASE}/Document/{doc_id}", headers=headers_glpi, params={"alt": "media"}
+        )
+        if resp_bin.status_code not in (200, 206):
+            avisos.append(f"'{nome_arquivo}': falha ao baixar conteúdo (status {resp_bin.status_code})")
+            continue
+
+        tamanho_mb = len(resp_bin.content) / (1024 * 1024)
+        if tamanho_mb > TAMANHO_MAXIMO_ANEXO_MB:
+            avisos.append(f"'{nome_arquivo}' tem {tamanho_mb:.1f}MB, acima do limite de "
+                           f"{TAMANHO_MAXIMO_ANEXO_MB}MB do Tiflux — não enviado")
+            continue
+
+        anexos.append((nome_arquivo, resp_bin.content, mime))
+
+    return anexos, avisos
+
+
+def enviar_anexos_tiflux(ticket_number_tiflux, anexos):
+    """
+    Envia os anexos pro ticket no Tiflux, em lotes de até 10 por requisição
+    (limite da API). Retorna (qtd_enviados, qtd_falhados, motivos_das_falhas).
+    """
+    if not anexos:
+        return 0, 0, []
+
+    enviados = 0
+    falhados = 0
+    motivos = []
+
+    for i in range(0, len(anexos), 10):
+        lote = anexos[i:i + 10]
+        arquivos_form = [("files[]", (nome, conteudo, mime)) for nome, conteudo, mime in lote]
+        # headers_tiflux_get só tem Accept + Authorization — sem Content-Type,
+        # pra deixar o requests montar o multipart/form-data com o boundary certo.
+        resp = requests.post(
+            f"{URL_TIFLUX}/tickets/{ticket_number_tiflux}/files",
+            files=arquivos_form,
+            headers=headers_tiflux_get,
+        )
+        if resp.status_code in (200, 201):
+            enviados += len(lote)
+        else:
+            falhados += len(lote)
+            motivos.append(f"Lote {i // 10 + 1} ({resp.status_code}): {resp.text}")
+
+    return enviados, falhados, motivos
+
+
 # =============================================================================
 # 5. PROCESSAMENTO DE UM CHAMADO
 # =============================================================================
@@ -433,7 +569,10 @@ def processar_chamado(headers_glpi, id_chamado):
         titulo_tiflux = f"{titulo_glpi} ({id_chamado})"
         cabecalho_personalizado = f"Este chamado tem a prioridade: {prioridade_glpi_texto}"
         info_solicitante_texto = f"Solicitante: {nome_solicitante_glpi} <{email_solicitante_glpi or 'Sem e-mail'}>"
-        descricao_tiflux = f"{cabecalho_personalizado}<br><br>{info_solicitante_texto}<br><br>Descrição:<br>{descricao_glpi}"
+        descricao_glpi_texto = html_para_texto_plano(descricao_glpi)
+        # Campo de descrição do Tiflux é texto puro (não HTML) — usa \n, não <br>
+        descricao_tiflux = (f"{cabecalho_personalizado}\n\n{info_solicitante_texto}\n\n"
+                             f"Descrição:\n{descricao_glpi_texto}")
 
         form_data = {
             "title": titulo_tiflux,
@@ -470,9 +609,23 @@ def processar_chamado(headers_glpi, id_chamado):
                    f"{nome_tecnico_tiflux} ({resp_update.status_code}): {resp_update.text}")
             return "erro", ticket_number_tiflux, msg
 
+        # Anexos (arquivos e imagens da descrição) — não falha o chamado se algo
+        # aqui der errado, o ticket já foi criado; só registra no log/auditoria.
+        anexos, avisos_anexos = obter_anexos_glpi(headers_glpi, id_chamado)
+        anexos_enviados, anexos_falhados, motivos_falha = enviar_anexos_tiflux(ticket_number_tiflux, anexos)
+
+        resumo_anexos = ""
+        if anexos or avisos_anexos:
+            resumo_anexos = f" | Anexos: {anexos_enviados} enviado(s)"
+            if anexos_falhados:
+                resumo_anexos += f", {anexos_falhados} falhou(aram) [{'; '.join(motivos_falha)}]"
+            if avisos_anexos:
+                resumo_anexos += f" | Avisos: {'; '.join(avisos_anexos)}"
+
         msg = (f"Ticket #{ticket_number_tiflux} criado no Tiflux | Mesa {mesa_tiflux} | "
                f"Prioridade ID {id_prioridade_tiflux} | "
-               f"Técnico {nome_tecnico_tiflux} | Solicitante {info_solicitante_tiflux}")
+               f"Técnico {nome_tecnico_tiflux} | Solicitante {info_solicitante_tiflux}"
+               f"{resumo_anexos}")
         return "sucesso", ticket_number_tiflux, msg
 
     except requests.RequestException as e:
@@ -526,16 +679,18 @@ def main():
         total_erro = 0
         for id_chamado in candidatos:
             status, numero_tiflux, mensagem = processar_chamado(headers_glpi, id_chamado)
-            registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
 
             if status == "sucesso":
                 total_sucesso += 1
+                registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
                 log(f"✅ Chamado #{id_chamado}: {mensagem}")
             elif status == "ignorado":
                 total_ignorado += 1
-                log(f"⏭️  Chamado #{id_chamado} ignorado: {mensagem}")
+                # Não interessa: nem grava na auditoria, nem loga por chamado —
+                # só entra na contagem final abaixo.
             else:
                 total_erro += 1
+                registrar_resultado(conn, id_chamado, numero_tiflux, status, mensagem)
                 log(f"❌ Chamado #{id_chamado}: {mensagem}")
 
         log(f"Finalizado. Sucesso: {total_sucesso} | Ignorado: {total_ignorado} | Erro: {total_erro}")
