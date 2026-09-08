@@ -1,22 +1,17 @@
 # Handoff
 
-DONE: Split `glpi_tiflux.py` into `sync/` package + 93-test suite (committed
-9d96939, 0f8ed1f, fac2da3, pushed to origin/v2). Technician-assignment change:
-only mesa ARRECADAÇÃO gets an auto-assigned technician (Léo Alves); every
-other mesa's ticket is created in Tiflux unassigned. Windows Task Scheduler
-job "GLPI-Tiflux-Sync" created (runs as SYSTEM, every 5 minutes, working
-directory set so `credenciais.txt` resolves) — verified with a manual trigger
-(LastTaskResult 0). While verifying, found and fixed a live crash: `log()`
-raised `UnicodeEncodeError` on the emoji in `buscar_chamados_desde()`'s
-unconditional final log line, on this machine's cp1252 console — that line
-runs on every invocation, so it would have failed the 5-minute job on
-essentially every run. `log()` now catches the encoding error and re-encodes
-with `errors="replace"` instead of crashing the process. Regression test
-added (`tests/test_config.py`). Not committed yet.
+DONE: Split `glpi_tiflux.py` into `sync/` package + 93-test suite; technician
+auto-assignment restricted to mesa ARRECADAÇÃO; `log()` crash on cp1252
+console (emoji UnicodeEncodeError) fixed with `errors="replace"` fallback +
+regression test. All committed and pushed to origin/v2 (up to eabd5d3).
+Windows Task Scheduler job "GLPI-Tiflux-Sync" (SYSTEM, every 5 min) confirmed
+healthy: LastTaskResult 0. Fixed unrelated `.gitignore` bug found this
+session — `__pycache__\` had a stray trailing backslash so it never matched
+pycache directories; corrected to `__pycache__/` (uncommitted).
 
-NEXT: Review the diff, then commit and push. Watch the scheduled task for a
-few cycles (`Get-ScheduledTaskInfo -TaskName "GLPI-Tiflux-Sync"`) to confirm
-`LastTaskResult` stays 0.
+NEXT: Commit the `.gitignore` fix. Keep an eye on
+`Get-ScheduledTaskInfo -TaskName "GLPI-Tiflux-Sync"` over the next several
+cycles to confirm `LastTaskResult` stays 0 long-term.
 
 RISKS:
 - Tests mock all I/O (HTTP, Postgres) — they verify orchestration and request
