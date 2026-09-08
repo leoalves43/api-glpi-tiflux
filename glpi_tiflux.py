@@ -64,6 +64,9 @@ CLIENTE_TIFLUX_ID = 762707
 ID_SOLICITANTE_PADRAO = 3758056  # Ju STII
 # Prioridade não é mais fixa: é resolvida dinamicamente por mesa em obter_prioridade_tiflux()
 
+# Só sincroniza chamados que tenham esse grupo como OBSERVADOR no GLPI
+ID_GRUPO_OBSERVADOR = 22  # Embras Atendimentos
+
 ID_TECNICO_LEO = 117180
 ID_TECNICO_SANIA = 1019979
 
@@ -102,10 +105,25 @@ def conectar_db():
     )
 
 
-def obter_ids_ja_sincronizados_com_sucesso(conn):
+def obter_ids_ja_processados(conn):
+    """IDs que já têm um resultado final (sucesso ou ignorado) e não devem ser reprocessados."""
     with conn.cursor() as cur:
-        cur.execute(f"SELECT id_glpi FROM {TABELA_AUDITORIA} WHERE status = 'sucesso'")
+        cur.execute(f"SELECT id_glpi FROM {TABELA_AUDITORIA} WHERE status IN ('sucesso', 'ignorado')")
         return {row[0] for row in cur.fetchall()}
+
+
+def obter_proximo_id_para_sondar(conn):
+    """
+    De onde a sondagem deve continuar: logo após o maior id_glpi já registrado
+    na auditoria (sucesso, erro ou ignorado — qualquer um confirma que aquele
+    ID já foi verificado), nunca abaixo de ID_MINIMO_GLPI.
+    """
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT MAX(id_glpi) FROM {TABELA_AUDITORIA}")
+        maior_id = cur.fetchone()[0]
+    if maior_id is None:
+        return ID_MINIMO_GLPI
+    return max(ID_MINIMO_GLPI, maior_id + 1)
 
 
 def obter_ids_para_retry(conn):
@@ -154,56 +172,45 @@ def encerrar_sessao_glpi(headers_glpi):
         pass
 
 
-def _obter_campo_id_busca(headers_glpi, itemtype="Ticket"):
+# Máximo de IDs "furados" (404) seguidos antes de considerar que chegamos no
+# fim dos chamados criados até agora e parar de sondar nessa execução.
+MAX_FUROS_SEGUIDOS = 50
+
+
+def buscar_chamados_desde(headers_glpi, id_inicial, limite_por_execucao=TAMANHO_PAGINA_BUSCA):
     """
-    Descobre dinamicamente qual o número do campo 'ID' no motor de busca do GLPI
-    para o itemtype informado (evita "chutar" o número, que pode variar entre
-    instalações/plugins do GLPI).
+    Sonda sequencialmente cada ID a partir de id_inicial via GET /Ticket/{id}
+    (o mesmo endpoint, comprovadamente confiável, que já usamos pra buscar os
+    dados de cada chamado). Evitamos o endpoint /search/Ticket porque nessa
+    instalação ele se mostrou inconsistente (campo/boundary/entidade geraram
+    resultados que não batiam com chamados confirmados via GET direto).
+
+    Para depois de MAX_FUROS_SEGUIDOS IDs seguidos sem chamado (assume que
+    chegou no fim dos criados até agora), ou ao atingir limite_por_execucao
+    chamados encontrados.
     """
-    resp = requests.get(f"{URL_BASE}/listSearchOptions/{itemtype}", headers=headers_glpi)
-    resp.raise_for_status()
-    opcoes = resp.json()
-    for campo, dados in opcoes.items():
-        if not isinstance(dados, dict):
-            continue
-        uid = dados.get("uid", "")
-        if uid == f"{itemtype}.id":
-            return campo
-    # Fallback conhecido (campo 2 = ID na maioria das instalações padrão do GLPI)
-    log("⚠️  Não encontrei o campo 'ID' via listSearchOptions, usando fallback field=2.")
-    return "2"
+    encontrados = []
+    id_atual = id_inicial
+    furos_seguidos = 0
 
+    while furos_seguidos < MAX_FUROS_SEGUIDOS and len(encontrados) < limite_por_execucao:
+        resp = requests.get(f"{URL_BASE}/Ticket/{id_atual}", headers=headers_glpi)
+        if resp.status_code in (200, 206):
+            encontrados.append(id_atual)
+            furos_seguidos = 0
+        elif resp.status_code == 404:
+            furos_seguidos += 1
+        else:
+            log(f"⚠️ Status inesperado ({resp.status_code}) ao sondar chamado #{id_atual}: {resp.text}")
+            furos_seguidos += 1
+        id_atual += 1
 
-def buscar_chamados_desde(headers_glpi, id_minimo, tamanho_pagina=TAMANHO_PAGINA_BUSCA):
-    """Retorna a lista de IDs de chamados no GLPI com id >= id_minimo."""
-    campo_id = _obter_campo_id_busca(headers_glpi, "Ticket")
+    if furos_seguidos >= MAX_FUROS_SEGUIDOS:
+        log(f"🔎 Sondagem parou após {MAX_FUROS_SEGUIDOS} IDs seguidos sem chamado "
+            f"(parou em #{id_atual - 1}). Se isso for prematuro, aumente MAX_FUROS_SEGUIDOS.")
 
-    params = {
-        "criteria[0][field]": campo_id,
-        "criteria[0][searchtype]": "morethan",
-        "criteria[0][value]": id_minimo - 1,
-        "sort": campo_id,
-        "order": "ASC",
-        "range": f"0-{tamanho_pagina - 1}",
-        "forcedisplay[0]": campo_id,
-    }
-    resp = requests.get(f"{URL_BASE}/search/Ticket", headers=headers_glpi, params=params)
-    if resp.status_code not in (200, 206):
-        log(f"❌ Erro ao buscar chamados no GLPI: {resp.status_code} {resp.text}")
-        return []
-
-    dados = resp.json()
-    total = dados.get("totalcount", 0)
-    if total > tamanho_pagina:
-        log(f"⚠️  Existem {total} chamados pendentes, mas só {tamanho_pagina} foram buscados "
-            f"nessa execução. Aumente TAMANHO_PAGINA_BUSCA se isso persistir.")
-
-    ids = []
-    for item in dados.get("data", []):
-        valor = item.get(campo_id) or item.get(str(campo_id))
-        if valor is not None:
-            ids.append(int(valor))
-    return ids
+    log(f"🔎 Sondagem de #{id_inicial} até #{id_atual - 1}: {len(encontrados)} chamado(s) encontrado(s)")
+    return encontrados
 
 
 # =============================================================================
@@ -347,6 +354,23 @@ def obter_requerente_glpi(headers_glpi, id_chamado, ticket):
     return nome_solicitante, email_solicitante
 
 
+def chamado_tem_grupo_observador(headers_glpi, id_chamado):
+    """
+    Confere se o grupo ID_GRUPO_OBSERVADOR está vinculado ao chamado como
+    OBSERVADOR (type=3 em Group_Ticket, conforme GLPI: 1=Requerente, 2=Atribuído, 3=Observador).
+    Retorna (bool, motivo_se_nao_encontrado_ou_erro).
+    """
+    resp = requests.get(f"{URL_BASE}/Ticket/{id_chamado}/Group_Ticket", headers=headers_glpi)
+    if resp.status_code not in (200, 206):
+        return False, f"Falha ao consultar grupos do chamado no GLPI (status {resp.status_code})"
+
+    for vinculo in resp.json():
+        if vinculo.get("type") == 3 and vinculo.get("groups_id") == ID_GRUPO_OBSERVADOR:
+            return True, None
+
+    return False, f"Chamado não tem o grupo observador ID {ID_GRUPO_OBSERVADOR}"
+
+
 # =============================================================================
 # 5. PROCESSAMENTO DE UM CHAMADO
 # =============================================================================
@@ -355,10 +379,18 @@ def processar_chamado(headers_glpi, id_chamado):
     """
     Processa um único chamado do GLPI: busca dados, traduz, cria no Tiflux
     e atribui o técnico.
-    Retorna (status, numero_tiflux, mensagem) — nunca lança exceção pro chamador,
-    qualquer erro vira status='erro' + mensagem explicando o motivo.
+    Retorna (status, numero_tiflux, mensagem):
+      - status='sucesso'  -> sincronizado normalmente
+      - status='ignorado' -> fora do escopo (ex: sem o grupo observador exigido);
+        NÃO é reprocessado nas próximas execuções
+      - status='erro'     -> falha real (API, rede, dado inconsistente);
+        É reprocessado automaticamente nas próximas execuções
     """
     try:
+        esta_no_escopo, motivo = chamado_tem_grupo_observador(headers_glpi, id_chamado)
+        if not esta_no_escopo:
+            return "ignorado", None, motivo
+
         resp_ticket = requests.get(f"{URL_BASE}/Ticket/{id_chamado}", headers=headers_glpi)
         if resp_ticket.status_code not in (200, 206):
             return "erro", None, f"Chamado não encontrado no GLPI (status {resp_ticket.status_code})"
@@ -470,15 +502,16 @@ def main():
         sys.exit(1)
 
     try:
-        ids_sucesso = obter_ids_ja_sincronizados_com_sucesso(conn)
+        ids_processados = obter_ids_ja_processados(conn)
         ids_retry = obter_ids_para_retry(conn)
         # Só reprocessa erros de chamados que ainda estão dentro da faixa válida
         # (se ID_MINIMO_GLPI mudar pra cima no futuro, erros antigos abaixo dele
         # não devem ficar sendo retentados pra sempre)
         ids_retry = {i for i in ids_retry if i >= ID_MINIMO_GLPI}
 
-        ids_glpi_encontrados = buscar_chamados_desde(headers_glpi, ID_MINIMO_GLPI)
-        ids_novos = [i for i in ids_glpi_encontrados if i not in ids_sucesso]
+        id_inicial_sondagem = obter_proximo_id_para_sondar(conn)
+        ids_glpi_encontrados = buscar_chamados_desde(headers_glpi, id_inicial_sondagem)
+        ids_novos = [i for i in ids_glpi_encontrados if i not in ids_processados]
 
         candidatos = sorted(set(ids_novos) | ids_retry)
 
@@ -489,6 +522,7 @@ def main():
         log(f"{len(candidatos)} chamado(s) para processar: {candidatos}")
 
         total_sucesso = 0
+        total_ignorado = 0
         total_erro = 0
         for id_chamado in candidatos:
             status, numero_tiflux, mensagem = processar_chamado(headers_glpi, id_chamado)
@@ -497,11 +531,14 @@ def main():
             if status == "sucesso":
                 total_sucesso += 1
                 log(f"✅ Chamado #{id_chamado}: {mensagem}")
+            elif status == "ignorado":
+                total_ignorado += 1
+                log(f"⏭️  Chamado #{id_chamado} ignorado: {mensagem}")
             else:
                 total_erro += 1
                 log(f"❌ Chamado #{id_chamado}: {mensagem}")
 
-        log(f"Finalizado. Sucesso: {total_sucesso} | Erro: {total_erro}")
+        log(f"Finalizado. Sucesso: {total_sucesso} | Ignorado: {total_ignorado} | Erro: {total_erro}")
 
     finally:
         encerrar_sessao_glpi(headers_glpi)

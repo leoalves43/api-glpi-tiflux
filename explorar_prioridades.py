@@ -18,7 +18,7 @@ headers = {
 print("Buscando prioridades e detalhes da Mesa de Arrecadação (37964)...\n")
 
 # Consultando a rota de prioridades/desks do TiFlux
-url = f"{URL_TIFLUX}/desks/37964"
+url = f"{URL_TIFLUX}/desks/37963"
 resposta = requests.get(url, headers=headers)
 
 if resposta.status_code != 200:
