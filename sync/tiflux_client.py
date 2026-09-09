@@ -125,6 +125,19 @@ class TifluxClient:
 
         return ticket_number, None
 
+    def obter_mesa_do_ticket(self, ticket_number: str) -> int | None:
+        """
+        GET /tickets/{ticket_number} e devolve o ID da mesa (desk) ATUAL do
+        ticket no Tiflux. Consultado a cada sincronização de followup (em vez de
+        reaproveitar a mesa de quando o ticket foi criado) porque tickets podem
+        ser movidos de mesa depois — followups sempre seguem a mesa de agora.
+        """
+        resp = requests.get(f"{self._url_base}/tickets/{ticket_number}", headers=self._headers_get)
+        if resp.status_code != 200:
+            log(f"⚠️ Não foi possível obter a mesa do ticket Tiflux #{ticket_number} ({resp.status_code}): {resp.text}")
+            return None
+        return (resp.json().get("desk") or {}).get("id")
+
     def atribuir_tecnico(self, ticket_number: str, id_tecnico: int) -> tuple[bool, int, str]:
         """Retorna (sucesso, status_http_da_ultima_tentativa, corpo_da_resposta)."""
         url_alterar_responsavel = f"{self._url_base}/tickets/{ticket_number}/change_responsible"

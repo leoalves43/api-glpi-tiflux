@@ -71,6 +71,11 @@ class Config:
 
     id_tecnico_leo: int = 117180
 
+    # IDs de usuário no GLPI (não no Tiflux) usados pra atribuir autoria de
+    # followups Tiflux -> GLPI conforme a mesa do chamado
+    id_glpi_leo: int = 4988
+    id_glpi_sania: int = 4816
+
     # Máximo de anexo aceito pelo Tiflux
     tamanho_maximo_anexo_mb: int = 25
 

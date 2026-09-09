@@ -33,12 +33,12 @@ class FakeGlpiClient:
     def obter_followups(self, id_chamado):
         return self.followups.get(id_chamado, [])
 
-    def criar_followup(self, id_chamado, conteudo_html, is_private=0):
+    def criar_followup(self, id_chamado, conteudo_html, is_private=0, users_id=None):
         if self.erro_ao_criar_followup:
             return None, self.erro_ao_criar_followup
         self.proximo_id_followup += 1
         self.followups_criados.append({
-            "id_chamado": id_chamado, "conteudo": conteudo_html, "is_private": is_private,
+            "id_chamado": id_chamado, "conteudo": conteudo_html, "is_private": is_private, "users_id": users_id,
         })
         return self.proximo_id_followup, None
 
@@ -49,6 +49,7 @@ class FakeTifluxClient:
         self.mesas_validas: set[int] | None = None
         self.id_solicitante = (3758056, "Ju STII (Padrão)")
         self.resultado_criar_ticket: tuple[str | None, str | None] = ("T-1", None)
+        self.mesa_do_ticket: int | None = None
         self.resultado_atribuir_tecnico: tuple[bool, int, str] = (True, 200, "")
         self.resultado_anexos = (0, 0, [])
         self.tickets_criados: list[dict] = []
@@ -59,6 +60,9 @@ class FakeTifluxClient:
 
     def validar_mesa_do_cliente(self, id_mesa):
         return True if self.mesas_validas is None else id_mesa in self.mesas_validas
+
+    def obter_mesa_do_ticket(self, ticket_number):
+        return self.mesa_do_ticket
 
     def obter_id_solicitante(self, nome_glpi, email_glpi):
         return self.id_solicitante

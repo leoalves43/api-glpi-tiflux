@@ -96,10 +96,14 @@ class GlpiClient:
         dados = resp.json()
         return dados if isinstance(dados, list) else []
 
-    def criar_followup(self, id_chamado: int, conteudo_html: str, is_private: int = 0) -> tuple[int | None, str | None]:
+    def criar_followup(
+        self, id_chamado: int, conteudo_html: str, is_private: int = 0, users_id: int | None = None,
+    ) -> tuple[int | None, str | None]:
         """
         POST /ITILFollowup, usando o "input wrapper" padrão do GLPI pra criação de
-        itens. Retorna (id_criado, erro_ou_None).
+        itens. Sem users_id, o GLPI atribui a autoria ao usuário autenticado da API
+        (sempre o mesmo), então passamos users_id pra refletir o autor de verdade.
+        Retorna (id_criado, erro_ou_None).
         """
         payload = {
             "input": {
@@ -109,6 +113,8 @@ class GlpiClient:
                 "is_private": is_private,
             }
         }
+        if users_id is not None:
+            payload["input"]["users_id"] = users_id
         resp = requests.post(f"{self._url_base}/ITILFollowup", json=payload, headers=self._headers)
         if resp.status_code not in (200, 201):
             return None, f"Falha ao criar followup no GLPI ({resp.status_code}): {resp.text}"

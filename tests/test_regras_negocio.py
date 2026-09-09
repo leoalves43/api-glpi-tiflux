@@ -3,6 +3,7 @@ import unittest
 from sync.config import Config
 from sync.regras_negocio import (
     autor_e_solicitante,
+    definir_autor_glpi,
     definir_prioridade,
     definir_tecnico,
     depara_categoria,
@@ -49,6 +50,15 @@ class TestDefinirTecnico(unittest.TestCase):
         for mesa in (37963, 37965, 37966):
             id_tecnico, nome = definir_tecnico(mesa, _CONFIG_TESTE)
             self.assertEqual((id_tecnico, nome), (None, None))
+
+
+class TestDefinirAutorGlpi(unittest.TestCase):
+    def test_arrecadacao_vai_para_leo_independente_do_tecnico(self):
+        self.assertEqual(definir_autor_glpi(37964, _CONFIG_TESTE), _CONFIG_TESTE.id_glpi_leo)
+
+    def test_qualquer_outra_mesa_vai_para_sania_independente_do_tecnico(self):
+        for mesa in (37963, 37965, 37966, None):
+            self.assertEqual(definir_autor_glpi(mesa, _CONFIG_TESTE), _CONFIG_TESTE.id_glpi_sania)
 
 
 class TestDefinirPrioridade(unittest.TestCase):

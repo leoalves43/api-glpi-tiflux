@@ -87,6 +87,32 @@ class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.glpi.followups_criados[0]["is_private"], 1)
 
+    def test_mesa_arrecadacao_atribui_followup_ao_leo_no_glpi(self):
+        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
+        self.tiflux.mesa_do_ticket = 37964  # ARRECADAÇÃO
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_leo)
+
+    def test_outra_mesa_atribui_followup_a_sania_no_glpi_mesmo_que_o_tecnico_seja_outro(self):
+        self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
+        self.tiflux.mesa_do_ticket = 37965  # FINANÇAS
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
+
+    def test_mesa_atual_prevalece_mesmo_se_ticket_mudou_de_mesa_apos_criado(self):
+        # Chamado criado originalmente em ARRECADAÇÃO, mas já foi movido pra
+        # outra mesa no Tiflux — a autoria do followup deve seguir a mesa ATUAL.
+        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
+        self.tiflux.mesa_do_ticket = 37966  # SUPRIMENTOS agora
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
+
+    def test_mesa_desconhecida_cai_no_padrao_sania(self):
+        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
+        self.tiflux.mesa_do_ticket = None
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
+
     def test_resposta_de_origem_api_e_ignorada_eco(self):
         self.tiflux.respostas = [{"id": 1, "name": "eco", "answer_origin": "api"}]
         sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")

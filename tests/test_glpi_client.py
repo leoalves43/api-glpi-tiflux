@@ -86,6 +86,22 @@ class TestCriarFollowup(unittest.TestCase):
         self.assertIsNone(id_criado)
         self.assertIn("400", erro)
 
+    def test_users_id_e_enviado_no_payload_quando_informado(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/ITILFollowup", FakeResponse(201, {"id": 9}))
+        with patch("sync.glpi_client.requests", fake):
+            _client(fake).criar_followup(1, "<p>oi</p>", users_id=4988)
+        _, _, kwargs = fake.chamadas[-1]
+        self.assertEqual(kwargs["json"]["input"]["users_id"], 4988)
+
+    def test_users_id_ausente_do_payload_quando_nao_informado(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/ITILFollowup", FakeResponse(201, {"id": 9}))
+        with patch("sync.glpi_client.requests", fake):
+            _client(fake).criar_followup(1, "<p>oi</p>")
+        _, _, kwargs = fake.chamadas[-1]
+        self.assertNotIn("users_id", kwargs["json"]["input"])
+
     def test_sem_id_na_resposta_retorna_erro(self):
         fake = FakeRequests()
         fake.programar("POST", "/ITILFollowup", FakeResponse(201, {}))

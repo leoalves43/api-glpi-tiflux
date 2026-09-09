@@ -41,6 +41,19 @@ def definir_tecnico(id_mesa: int, config: Config) -> tuple[int | None, str | Non
     return None, None
 
 
+def definir_autor_glpi(id_mesa: int | None, config: Config) -> int:
+    """
+    Define de quem é a autoria (no GLPI) de um followup sincronizado do Tiflux,
+    com base na MESA ATUAL do chamado no Tiflux — não no técnico atribuído lá.
+    Mesa ARRECADAÇÃO sempre vai em nome do Léo; qualquer outra mesa (ou mesa
+    desconhecida/não resolvida) sempre vai em nome da Sania, independente de
+    qual técnico esteja atribuído lá.
+    """
+    if id_mesa == 37964:  # ARRECADAÇÃO
+        return config.id_glpi_leo
+    return config.id_glpi_sania
+
+
 def definir_prioridade(id_mesa: int) -> int | None:
     """Retorna o ID de prioridade fixo configurado para a mesa, ou None se não configurado."""
     return PRIORIDADE_POR_MESA.get(id_mesa)

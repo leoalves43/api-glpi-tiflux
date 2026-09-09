@@ -32,6 +32,20 @@ class TestValidarMesaDoCliente(unittest.TestCase):
             self.assertTrue(_client().validar_mesa_do_cliente(37963))
 
 
+class TestObterMesaDoTicket(unittest.TestCase):
+    def test_retorna_id_da_mesa_atual(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets/T-1", FakeResponse(200, {"desk": {"id": 37964}}))
+        with patch("sync.tiflux_client.requests", fake):
+            self.assertEqual(_client().obter_mesa_do_ticket("T-1"), 37964)
+
+    def test_falha_http_retorna_none(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets/T-1", FakeResponse(500, text="erro"))
+        with patch("sync.tiflux_client.requests", fake), _sem_console():
+            self.assertIsNone(_client().obter_mesa_do_ticket("T-1"))
+
+
 class TestObterIdSolicitante(unittest.TestCase):
     def test_sem_email_usa_padrao(self):
         client = _client()
