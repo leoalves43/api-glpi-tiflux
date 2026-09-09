@@ -48,6 +48,17 @@ class TestRegistrarResultado(unittest.TestCase):
         self.assertEqual(params, (123, "T1", "sucesso", "ok"))
         self.assertEqual(conn.commits, 1)
 
+    def test_sanea_caractere_fora_do_win1252_antes_de_gravar(self):
+        """
+        Banco de auditoria tem encoding WIN1252; caracteres como '✪' (vindos de
+        título do GLPI ou corpo de erro da API do Tiflux) derrubavam o INSERT
+        com UntranslatableCharacter e paravam a sincronização inteira.
+        """
+        conn = FakeConnection()
+        db_chamados.registrar_resultado(conn, _CONFIG, 123, "T1", "erro", "Cliente SP-CARAGUATATUBA-PM ✪ falhou")
+        _, params = conn.execucoes[0]
+        self.assertEqual(params, (123, "T1", "erro", "Cliente SP-CARAGUATATUBA-PM ? falhou"))
+
 
 if __name__ == "__main__":
     unittest.main()

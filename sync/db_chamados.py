@@ -7,10 +7,31 @@ from sync.config import Config
 
 
 def conectar_db(config: Config) -> psycopg2.extensions.connection:
-    return psycopg2.connect(
+    """
+    Sem client_encoding explícito, o libpq no Windows herda o codepage do SO
+    (cp1252) em vez de UTF8, e nem chega a mandar os bytes pro Postgres antes
+    de estourar UnicodeEncodeError. Forçar UTF8 aqui resolve isso — mas o
+    banco em si tem encoding WIN1252 (não dá pra mudar sem recriar o banco),
+    então caracteres fora do WIN1252 (ex: '✪') ainda precisam ser saneados
+    antes do INSERT; ver _sanear_win1252 em registrar_resultado.
+    """
+    conn = psycopg2.connect(
         host=config.db_host, port=config.db_port, dbname=config.db_name,
         user=config.db_user, password=config.db_password,
     )
+    conn.set_client_encoding("UTF8")
+    return conn
+
+
+def _sanear_win1252(texto: str) -> str:
+    """
+    O banco de auditoria tem encoding WIN1252; texto vindo de fora (título do
+    GLPI, corpo de erro da API do Tiflux) pode ter caracteres fora desse
+    charset (ex: '✪') que o Postgres rejeita com UntranslatableCharacter.
+    Substitui o que não for representável por '?' em vez de derrubar a
+    sincronização inteira por causa de uma mensagem de auditoria.
+    """
+    return texto.encode("cp1252", errors="replace").decode("cp1252")
 
 
 def obter_ids_ja_processados(conn, config: Config) -> set[int]:
@@ -62,6 +83,6 @@ def registrar_resultado(conn, config: Config, id_glpi: int, numero_tiflux, statu
                 tentativas    = {tabela}.tentativas + 1,
                 atualizado_em = now()
             """,
-            (id_glpi, numero_tiflux, status, mensagem),
+            (id_glpi, numero_tiflux, status, _sanear_win1252(mensagem)),
         )
     conn.commit()
