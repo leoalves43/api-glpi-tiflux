@@ -203,11 +203,24 @@ def sincronizar_followups_glpi_para_tiflux(
 
 
 def _followups_glpi_pendentes(conn, config: Config, glpi: GlpiClient, id_chamado: int) -> list[dict]:
+    """
+    Followups do GLPI ainda não publicados no Tiflux, excluindo os que a
+    própria integração criou lá (Tiflux -> GLPI): esses sempre têm users_id
+    Léo ou Sania (ver definir_autor_glpi), nunca de quem respondeu de fato no
+    Tiflux — sem esse filtro, cada um viraria eco: publicado de volta no
+    Tiflux como se fosse uma resposta nova, duplicando a mensagem original.
+    Um followup escrito de verdade por Léo ou Sania direto no GLPI (não via
+    esta integração) também é filtrado — mesma authoria, sem como distinguir.
+    """
     followups = glpi.obter_followups(id_chamado)
     if not followups:
         return []
     ja_processados = db_followups.obter_followups_glpi_ja_processados(conn, config, id_chamado)
-    return [f for f in followups if f.get("id") not in ja_processados]
+    ids_proprios = {config.id_glpi_leo, config.id_glpi_sania}
+    return [
+        f for f in followups
+        if f.get("id") not in ja_processados and f.get("users_id") not in ids_proprios
+    ]
 
 
 def _resolver_requerente(glpi: GlpiClient, id_chamado: int) -> tuple[str, int | None]:

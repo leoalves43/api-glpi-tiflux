@@ -88,6 +88,33 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 1))
 
+    def test_followup_criado_pela_integracao_em_nome_de_leo_nao_e_reenviado_ao_tiflux(self):
+        # Eco: um followup Tiflux->GLPI criado com users_id=Léo (mesa
+        # ARRECADAÇÃO) não pode voltar pro Tiflux como se fosse resposta nova.
+        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": _CONFIG.id_glpi_leo}]
+        self.glpi.tickets[1] = {}
+        sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual((sucesso, erro), (0, 0))
+        self.assertEqual(self.tiflux.publicacoes, [])
+
+    def test_followup_criado_pela_integracao_em_nome_de_sania_nao_e_reenviado_ao_tiflux(self):
+        self.glpi.followups[1] = [{"id": 11, "content": "oi", "is_private": 1, "users_id": _CONFIG.id_glpi_sania}]
+        self.glpi.tickets[1] = {}
+        sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual((sucesso, erro), (0, 0))
+        self.assertEqual(self.tiflux.publicacoes, [])
+
+    def test_followup_de_outro_autor_e_enviado_normalmente_mesmo_com_outros_ja_filtrados(self):
+        self.glpi.followups[1] = [
+            {"id": 10, "content": "eco", "is_private": 0, "users_id": _CONFIG.id_glpi_leo},
+            {"id": 12, "content": "resposta real", "is_private": 0, "users_id": 42},
+        ]
+        self.glpi.tickets[1] = {}
+        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 5)
+        sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual((sucesso, erro), (1, 0))
+        self.assertEqual(len(self.tiflux.publicacoes), 1)
+
     def test_ja_processado_e_ignorado(self):
         self.conn = FakeConnection(respostas=[[(10,)]])
         self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 1, "users_id": 5}]
