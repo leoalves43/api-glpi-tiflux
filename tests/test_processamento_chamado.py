@@ -83,6 +83,23 @@ class TestProcessarChamado(unittest.TestCase):
         processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
         self.assertEqual(self.glpi.titulos_atualizados, [(1, "#T-1 - Problema X")])
 
+    def test_sucesso_atribui_tecnico_leo_no_glpi_para_mesa_arrecadacao(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [(1, _CONFIG.id_glpi_leo)])
+
+    def test_sucesso_atribui_tecnico_sania_no_glpi_para_outras_mesas(self):
+        self.glpi.tickets[1] = _TICKET_FINANCAS
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [(1, _CONFIG.id_glpi_sania)])
+
+    def test_falha_ao_atribuir_tecnico_no_glpi_nao_derruba_sincronizacao(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        self.glpi.resultado_atribuir_tecnico_glpi = (False, "Falha ao atribuir técnico no GLPI ao chamado #1 (500): boom")
+        status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual((status, numero), ("sucesso", "T-1"))
+        self.assertIn("Aviso: falha ao atribuir técnico no GLPI", msg)
+
     def test_falha_ao_atualizar_titulo_nao_derruba_sincronizacao(self):
         # Ao contrário de atribuir_tecnico: já criou o ticket no Tiflux, marcar
         # como erro duplicaria no reprocessamento — só avisa e segue (like anexos).

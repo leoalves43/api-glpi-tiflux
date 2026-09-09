@@ -18,6 +18,12 @@ class FakeGlpiClient:
         self.resultado_encerrar_chamado: tuple[bool, str | None] = (True, None)
         self.titulos_atualizados: list[tuple[int, str]] = []
         self.resultado_atualizar_titulo: tuple[bool, str | None] = (True, None)
+        self.tecnicos_atribuidos_glpi: list[tuple[int, int]] = []
+        self.resultado_atribuir_tecnico_glpi: tuple[bool, str | None] = (True, None)
+        self.tecnico_ja_atribuido: dict[int, int | None] = {}
+        self.solucoes_registradas: list[tuple[int, str]] = []
+        self.resultado_registrar_solucao: tuple[bool, str | None] = (True, None)
+        self.ja_tem_solucao: dict[int, bool] = {}
 
     def chamado_tem_grupo_observador(self, id_chamado, id_grupo_observador):
         return self.grupo_observador.get(id_chamado, (True, None))
@@ -53,6 +59,20 @@ class FakeGlpiClient:
     def atualizar_titulo(self, id_chamado, titulo):
         self.titulos_atualizados.append((id_chamado, titulo))
         return self.resultado_atualizar_titulo
+
+    def atribuir_tecnico(self, id_chamado, id_usuario):
+        self.tecnicos_atribuidos_glpi.append((id_chamado, id_usuario))
+        return self.resultado_atribuir_tecnico_glpi
+
+    def tecnico_atribuido(self, id_chamado):
+        return self.tecnico_ja_atribuido.get(id_chamado)
+
+    def registrar_solucao(self, id_chamado, conteudo):
+        self.solucoes_registradas.append((id_chamado, conteudo))
+        return self.resultado_registrar_solucao
+
+    def solucao_registrada(self, id_chamado):
+        return self.ja_tem_solucao.get(id_chamado, False)
 
 
 class FakeTifluxClient:

@@ -6,6 +6,7 @@ from sync.config import Config, log
 from sync.glpi_client import GlpiClient
 from sync.html_texto import html_para_texto_plano
 from sync.regras_negocio import (
+    definir_autor_glpi,
     definir_prioridade,
     definir_tecnico,
     depara_categoria,
@@ -65,13 +66,14 @@ def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamad
     if id_tecnico_tiflux is not None:
         _atribuir_tecnico(tiflux, ticket_number_tiflux, id_tecnico_tiflux, nome_tecnico_tiflux)
     aviso_titulo = _atualizar_titulo_glpi(glpi, id_chamado, ticket.get("name"), ticket_number_tiflux)
+    aviso_tecnico_glpi = _atribuir_tecnico_glpi(glpi, id_chamado, mesa_tiflux, config, ticket_number_tiflux)
     resumo_anexos = _sincronizar_anexos(glpi, tiflux, config, id_chamado, ticket_number_tiflux)
 
     texto_tecnico = f"Técnico {nome_tecnico_tiflux}" if nome_tecnico_tiflux else "Sem técnico atribuído"
     msg = (f"Ticket #{ticket_number_tiflux} criado no Tiflux | Mesa {mesa_tiflux} | "
            f"Prioridade ID {id_prioridade_tiflux} | "
            f"{texto_tecnico} | Solicitante {info_solicitante_tiflux}"
-           f"{resumo_anexos}{aviso_titulo}")
+           f"{resumo_anexos}{aviso_titulo}{aviso_tecnico_glpi}")
     return "sucesso", ticket_number_tiflux, msg
 
 
@@ -150,6 +152,23 @@ def _atualizar_titulo_glpi(glpi: GlpiClient, id_chamado: int, titulo_original: s
         return ""
     log(f"⚠️ Ticket #{ticket_number_tiflux} criado, mas falhou ao prefixar o título no GLPI: {erro}")
     return " | Aviso: falha ao prefixar título no GLPI"
+
+
+def _atribuir_tecnico_glpi(glpi: GlpiClient, id_chamado: int, mesa_tiflux: int, config: Config, ticket_number_tiflux: str) -> str:
+    """
+    Atribui um técnico responsável no GLPI (mesma regra de definir_autor_glpi:
+    mesa ARRECADAÇÃO -> Léo, outras mesas -> Sania) — pré-requisito dessa
+    instalação do GLPI pra aceitar status Solucionado/Fechado mais tarde (ver
+    encerramento em cascata em sincronizacao_followups.py). Falha aqui não
+    derruba a sincronização, mesmo motivo do título: reprocessar duplicaria
+    o ticket no Tiflux.
+    """
+    id_tecnico_glpi = definir_autor_glpi(mesa_tiflux, config)
+    sucesso, erro = glpi.atribuir_tecnico(id_chamado, id_tecnico_glpi)
+    if sucesso:
+        return ""
+    log(f"⚠️ Ticket #{ticket_number_tiflux} criado, mas falhou ao atribuir técnico no GLPI: {erro}")
+    return " | Aviso: falha ao atribuir técnico no GLPI"
 
 
 def _montar_form_data(

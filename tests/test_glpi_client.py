@@ -129,6 +129,101 @@ class TestEncerrarChamado(unittest.TestCase):
         self.assertFalse(sucesso)
         self.assertIn("400", erro)
 
+    def test_recusa_com_http_200_conta_como_falha(self):
+        # Confirmado ao vivo: GLPI recusa regra de negócio (ex.: técnico
+        # obrigatório) com HTTP 200 e a recusa só aparece em `message`.
+        fake = FakeRequests()
+        fake.programar("PUT", "/Ticket/1", FakeResponse(200, [{"1": True, "message": "Técnico atribuído é obrigatório"}]))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).encerrar_chamado(1, 5)
+        self.assertFalse(sucesso)
+        self.assertIn("Técnico atribuído é obrigatório", erro)
+
+    def test_http_200_com_message_vazia_conta_como_sucesso(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/Ticket/1", FakeResponse(200, [{"1": True, "message": ""}]))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).encerrar_chamado(1, 5)
+        self.assertEqual((sucesso, erro), (True, None))
+
+
+class TestAtribuirTecnicoGlpi(unittest.TestCase):
+    def test_sucesso_retorna_true(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/Ticket_User", FakeResponse(201, {"id": 5}))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).atribuir_tecnico(1, 4988)
+        self.assertEqual((sucesso, erro), (True, None))
+        _, _, kwargs = fake.chamadas[-1]
+        self.assertEqual(kwargs["json"]["input"], {"tickets_id": 1, "users_id": 4988, "type": 2})
+
+    def test_falha_http_retorna_erro(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/Ticket_User", FakeResponse(400, text="bad request"))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).atribuir_tecnico(1, 4988)
+        self.assertFalse(sucesso)
+        self.assertIn("400", erro)
+
+
+class TestTecnicoAtribuido(unittest.TestCase):
+    def test_encontra_vinculo_tipo_2(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/Ticket_User", FakeResponse(200, [{"type": 1, "users_id": 4988}, {"type": 2, "users_id": 4816}]))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertEqual(_client(fake).tecnico_atribuido(1), 4816)
+
+    def test_sem_vinculo_tipo_2_retorna_none(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/Ticket_User", FakeResponse(200, [{"type": 1, "users_id": 4988}]))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertIsNone(_client(fake).tecnico_atribuido(1))
+
+    def test_falha_http_retorna_none(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/Ticket_User", FakeResponse(500, text="erro"))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertIsNone(_client(fake).tecnico_atribuido(1))
+
+
+class TestRegistrarSolucao(unittest.TestCase):
+    def test_sucesso_retorna_true(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/ITILSolution", FakeResponse(201, {"id": 1}))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).registrar_solucao(1, "resolvido")
+        self.assertEqual((sucesso, erro), (True, None))
+        _, _, kwargs = fake.chamadas[-1]
+        self.assertEqual(kwargs["json"]["input"]["content"], "resolvido")
+
+    def test_falha_http_retorna_erro(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/ITILSolution", FakeResponse(400, text="bad request"))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).registrar_solucao(1, "resolvido")
+        self.assertFalse(sucesso)
+        self.assertIn("400", erro)
+
+
+class TestSolucaoRegistrada(unittest.TestCase):
+    def test_ja_tem_solucao(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(200, [{"id": 1}]))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertTrue(_client(fake).solucao_registrada(1))
+
+    def test_sem_solucao(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(200, []))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertFalse(_client(fake).solucao_registrada(1))
+
+    def test_falha_http_retorna_false(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(500, text="erro"))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertFalse(_client(fake).solucao_registrada(1))
+
 
 class TestAtualizarTitulo(unittest.TestCase):
     def test_sucesso_retorna_true(self):
@@ -147,6 +242,14 @@ class TestAtualizarTitulo(unittest.TestCase):
             sucesso, erro = _client(fake).atualizar_titulo(1, "novo titulo")
         self.assertFalse(sucesso)
         self.assertIn("400", erro)
+
+    def test_recusa_com_http_200_conta_como_falha(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/Ticket/1", FakeResponse(200, [{"1": True, "message": "campo bloqueado"}]))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).atualizar_titulo(1, "novo titulo")
+        self.assertFalse(sucesso)
+        self.assertIn("campo bloqueado", erro)
 
 
 class TestChamadoTemGrupoObservador(unittest.TestCase):

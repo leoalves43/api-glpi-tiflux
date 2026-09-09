@@ -63,11 +63,7 @@ def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tifl
     totais["t2g_erro"] += e
 
     if ticket_tiflux and ticket_tiflux.get("is_closed"):
-        _mudar_status_em_cascata(
-            conn, config, glpi, id_glpi, numero_tiflux, STATUS_GLPI_SOLUCIONADO, "encerramento",
-            f"Chamado #{id_glpi} encerrado no GLPI (status Solucionado) — fechado/cancelado no Tiflux #{numero_tiflux}",
-            totais,
-        )
+        _encerrar_em_cascata(conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux, totais)
 
 
 def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, ticket_glpi, ticket_tiflux, totais) -> None:
@@ -94,6 +90,43 @@ def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, 
         return
 
     db_followups.registrar_chamado_fechado_para_followups(conn, config, id_glpi)
+
+
+_SEM_RESPOSTA_TIFLUX = "Chamado encerrado no Tiflux, sem resposta pública registrada."
+
+
+def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_glpi, numero_tiflux, ticket_tiflux, totais) -> None:
+    """
+    Essa instalação do GLPI recusa (com HTTP 200 mas message não-vazia, ver
+    GlpiClient._atualizar_chamado) mudar o status pra Solucionado sem técnico
+    atribuído E sem uma solução registrada — confirmado ao vivo. Garante os
+    dois antes de tentar. Se qualquer um dos dois falhar aqui, a tentativa de
+    status abaixo também vai falhar (GLPI recusa) e ser retentada na próxima
+    execução, quando os dois são tentados de novo — idempotente via
+    tecnico_atribuido()/solucao_registrada(), não duplica em retries.
+    """
+    if glpi.tecnico_atribuido(id_glpi) is None:
+        id_mesa = ((ticket_tiflux or {}).get("desk") or {}).get("id")
+        glpi.atribuir_tecnico(id_glpi, definir_autor_glpi(id_mesa, config))
+
+    if not glpi.solucao_registrada(id_glpi):
+        conteudo_solucao = _ultima_resposta_publica_tiflux(tiflux, numero_tiflux, config)
+        glpi.registrar_solucao(id_glpi, conteudo_solucao)
+
+    _mudar_status_em_cascata(
+        conn, config, glpi, id_glpi, numero_tiflux, STATUS_GLPI_SOLUCIONADO, "encerramento",
+        f"Chamado #{id_glpi} encerrado no GLPI (status Solucionado) — fechado/cancelado no Tiflux #{numero_tiflux}",
+        totais,
+    )
+
+
+def _ultima_resposta_publica_tiflux(tiflux: TifluxClient, numero_tiflux: str, config: Config) -> str:
+    """A resposta pública (/answers) mais recente do ticket no Tiflux, por answer_time, vira o conteúdo da solução no GLPI."""
+    respostas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
+    if not respostas:
+        return _SEM_RESPOSTA_TIFLUX
+    mais_recente = max(respostas, key=lambda r: r.get("answer_time") or "")
+    return html.unescape(mais_recente.get("name") or "") or _SEM_RESPOSTA_TIFLUX
 
 
 def _mudar_status_em_cascata(conn, config, glpi: GlpiClient, id_glpi, numero_tiflux, novo_status: int, tipo: str, mensagem_sucesso: str, totais) -> None:

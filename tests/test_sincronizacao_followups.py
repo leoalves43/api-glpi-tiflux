@@ -200,6 +200,45 @@ class TestEncerramentoEmCascata(unittest.TestCase):
         self.assertEqual(self.glpi.chamados_encerrados, [(1, 5)])
 
 
+class TestPreparacaoEncerramentoCascata(unittest.TestCase):
+    def setUp(self):
+        self.glpi = FakeGlpiClient()
+        self.tiflux = FakeTifluxClient()
+        self.glpi.tickets[1] = {"status": 1}
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37964}}  # ARRECADAÇÃO
+
+    def test_atribui_tecnico_no_glpi_quando_ainda_nao_tem(self):
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [(1, _CONFIG.id_glpi_leo)])
+
+    def test_nao_atribui_tecnico_de_novo_se_ja_tem(self):
+        self.glpi.tecnico_ja_atribuido[1] = _CONFIG.id_glpi_leo
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [])
+
+    def test_registra_ultima_resposta_publica_como_solucao(self):
+        self.tiflux.respostas = [
+            {"id": 1, "name": "primeira resposta", "answer_time": "2026-09-01T10:00:00Z"},
+            {"id": 2, "name": "resposta mais recente", "answer_time": "2026-09-05T10:00:00Z"},
+        ]
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.solucoes_registradas, [(1, "resposta mais recente")])
+
+    def test_sem_resposta_publica_usa_texto_padrao(self):
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.solucoes_registradas, [(1, "Chamado encerrado no Tiflux, sem resposta pública registrada.")])
+
+    def test_nao_registra_solucao_de_novo_se_ja_tem(self):
+        self.glpi.ja_tem_solucao[1] = True
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.solucoes_registradas, [])
+
+
 class TestReaberturaEmCascata(unittest.TestCase):
     def setUp(self):
         self.glpi = FakeGlpiClient()

@@ -9,6 +9,22 @@ from sync.config import Config, log
 Anexo = tuple[str, bytes, str]
 
 
+def _mensagem_de_recusa(resp: requests.Response) -> str | None:
+    """
+    PUT /Ticket/{id} devolve `[{"<id>": true, "message": "..."}]` — `message`
+    não-vazia é um aviso/recusa de regra de negócio (ex.: campo obrigatório
+    faltando) mesmo com HTTP 200. Retorna essa mensagem, ou None se vazia/
+    ausente/corpo em formato inesperado.
+    """
+    try:
+        dados = resp.json()
+    except ValueError:
+        return None
+    if isinstance(dados, list) and dados and isinstance(dados[0], dict):
+        return dados[0].get("message") or None
+    return None
+
+
 class GlpiClient:
     """Wraps a sessão autenticada do GLPI. Uma instância por execução do cron."""
 
@@ -144,11 +160,67 @@ class GlpiClient:
         return self._atualizar_chamado(id_chamado, {"name": titulo}, "atualizar título do")
 
     def _atualizar_chamado(self, id_chamado: int, campos: dict, acao: str) -> tuple[bool, str | None]:
+        """
+        PUT /Ticket/{id} SEMPRE devolve HTTP 200/201 nessa instalação do GLPI,
+        mesmo quando uma regra de negócio recusa o campo (ex.: status pra
+        Solucionado sem técnico atribuído ou sem solução registrada) — a
+        recusa só aparece dentro do corpo, em `message`, com o código HTTP de
+        sucesso mesmo assim. Confirmado ao vivo: sem checar `message`, uma
+        recusa dessas seria lida como sucesso e nunca mais retentada. Por
+        isso `message` não-vazia conta como falha aqui, mesmo com HTTP 200.
+        """
         payload = {"input": campos}
         resp = requests.put(f"{self._url_base}/Ticket/{id_chamado}", json=payload, headers=self._headers)
         if resp.status_code not in (200, 201):
             return False, f"Falha ao {acao} chamado #{id_chamado} no GLPI ({resp.status_code}): {resp.text}"
+
+        mensagem_glpi = _mensagem_de_recusa(resp)
+        if mensagem_glpi:
+            return False, f"GLPI recusou {acao} chamado #{id_chamado}: {mensagem_glpi}"
         return True, None
+
+    def atribuir_tecnico(self, id_chamado: int, id_usuario: int) -> tuple[bool, str | None]:
+        """
+        POST /Ticket_User (type=2, Atribuído) pra dar ao chamado um técnico
+        responsável no GLPI. Pré-requisito dessa instalação do GLPI pra
+        aceitar status Solucionado/Fechado depois — ver encerrar_chamado().
+        Retorna (sucesso, erro_ou_None).
+        """
+        payload = {"input": {"tickets_id": id_chamado, "users_id": id_usuario, "type": 2}}
+        resp = requests.post(f"{self._url_base}/Ticket_User", json=payload, headers=self._headers)
+        if resp.status_code not in (200, 201):
+            return False, f"Falha ao atribuir técnico no GLPI ao chamado #{id_chamado} ({resp.status_code}): {resp.text}"
+        return True, None
+
+    def tecnico_atribuido(self, id_chamado: int) -> int | None:
+        """GET /Ticket/{id}/Ticket_User — retorna o users_id do vínculo tipo 2 (Atribuído), ou None se não tiver."""
+        resp = self._get(f"/Ticket/{id_chamado}/Ticket_User")
+        if resp.status_code not in (200, 206):
+            return None
+        for vinculo in resp.json():
+            if vinculo.get("type") == 2:
+                return vinculo.get("users_id")
+        return None
+
+    def registrar_solucao(self, id_chamado: int, conteudo: str) -> tuple[bool, str | None]:
+        """
+        POST /ITILSolution. Pré-requisito dessa instalação do GLPI pra aceitar
+        status Solucionado/Fechado depois — ver encerrar_chamado().
+        Retorna (sucesso, erro_ou_None).
+        """
+        payload = {"input": {"itemtype": "Ticket", "items_id": id_chamado, "content": conteudo}}
+        resp = requests.post(f"{self._url_base}/ITILSolution", json=payload, headers=self._headers)
+        if resp.status_code not in (200, 201):
+            return False, f"Falha ao registrar solução no GLPI pro chamado #{id_chamado} ({resp.status_code}): {resp.text}"
+        return True, None
+
+    def solucao_registrada(self, id_chamado: int) -> bool:
+        """GET /Ticket/{id}/ITILSolution — True se já existe pelo menos uma solução, pra não duplicar em retries."""
+        resp = self._get(f"/Ticket/{id_chamado}/ITILSolution")
+        if resp.status_code not in (200, 206):
+            return False
+        dados = resp.json()
+        return isinstance(dados, list) and len(dados) > 0
 
     def obter_requerente(self, id_chamado: int, ticket: dict) -> tuple[str, str | None, int | None]:
         """Resolve nome, e-mail e id do requerente (Ticket_User type=1) de um chamado."""

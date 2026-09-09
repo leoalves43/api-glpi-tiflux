@@ -1,80 +1,110 @@
 # Handoff
 
-DONE (branch v3, pushed to origin/v3 up to 716a7bd):
+DONE (branch v3, pushed to origin/v3 up to 28f14ce; this session's work below is
+uncommitted):
 1. Followup authorship fix (commit 6440843): Tiflux->GLPI followups send
    `users_id` (mesa ARRECADAÇÃO -> Léo GLPI id 4988, any other mesa -> Sania
    GLPI id 4816), resolved from the ticket's CURRENT Tiflux mesa.
 2. Cascading close/reopen (commit 716a7bd): Tiflux ticket closed/canceled
    (`is_closed=True`) -> syncs pending followups, then closes GLPI (status 5
-   Solucionado, `GlpiClient.encerrar_chamado()`). Reopened in Tiflux while
-   GLPI sits at exactly status 5 -> reopens GLPI too (status 2, Processando).
-   Manual GLPI closures at any other status are never touched.
-   `TifluxClient.obter_ticket()` (replacing `obter_mesa_do_ticket()`) backs
-   both mesa resolution and the open/closed check off one Tiflux call per
-   chamado per pass.
+   Solucionado). Reopened in Tiflux while GLPI sits at exactly status 5 ->
+   reopens GLPI too (status 2, Processando). Manual GLPI closures at any
+   other status are never touched.
+3. GLPI title prefix (commit 28f14ce): after a chamado is created in Tiflux,
+   the GLPI ticket's title is prefixed with `#<numero_tiflux> - `.
 
-NOT YET COMMITTED — new this session:
-3. GLPI title prefix: after a chamado is created in Tiflux,
-   `_atualizar_titulo_glpi()` (sync/processamento_chamado.py) prefixes the
-   GLPI ticket's title with `#<numero_tiflux> - ` via new
-   `GlpiClient.atualizar_titulo()` (e.g. ticket #33684 titled `Solicito
-   "Inativação de Acessos" - E-mails diversos` becomes `#361458 - Solicito
-   "Inativação de Acessos" - E-mails diversos`). `atualizar_titulo()` and
-   `encerrar_chamado()` now share a private `_atualizar_chamado()` helper
-   (both are `PUT /Ticket/{id}` with a different `input` field).
-   IMPORTANT failure-mode decision: unlike `atribuir_tecnico` (which marks
-   the chamado 'erro' and lets it get reprocessed), a failed title update
-   only logs a warning and the chamado still counts as 'sucesso' — the user
-   explicitly chose this after being shown that 'erro' here would reprocess
-   `_processar()` from the top and create a DUPLICATE Tiflux ticket (the
-   ticket was already created by the time the title update runs; this is the
-   same known duplication bug documented in
-   `db_followups.obter_chamados_para_varrer_followups`'s docstring, which
-   `atribuir_tecnico` already has and which this deliberately avoids
-   repeating). 118 tests, all green.
+LIVE-VERIFIED THIS SESSION (real chamados #33630, #33733, #33736 on the
+production GLPI/Tiflux — not just mocks) — and found + fixed a real bug in
+the process:
+- **Bug found and fixed**: `PUT /Ticket/{id}` on this GLPI instance ALWAYS
+  returns HTTP 200/201, even when a business rule rejects the field change —
+  the rejection only shows up as a non-empty `message` in the response body
+  (e.g. `[{"33733":true,"message":"Técnico atribuído é obrigatório antes do
+  chamado ser solucionado/fechado"}]`). The original `encerrar_chamado()` /
+  `atualizar_titulo()` treated any 200/201 as success, so a rejected status
+  change would have silently no-op'd forever. Fixed: new module-level
+  `_mensagem_de_recusa()` (sync/glpi_client.py) inspects the body; a non-empty
+  `message` now counts as failure even on HTTP 200. Caught live, not by the
+  mocked tests — mocks can't fake this GLPI quirk unless told to.
+- **Bug found and fixed**: this GLPI instance also refuses to accept status
+  Solucionado/Fechado unless the ticket already has (a) an assigned
+  technician (`Ticket_User` type=2) and (b) at least one `ITILSolution`
+  registered — confirmed by triggering both rejections live, then manually
+  supplying each and confirming status 5 finally stuck. Fixed with two new
+  pieces, both keyed off the same `definir_autor_glpi()` mesa rule already
+  used for followup authorship:
+  - `processamento_chamado.py`: new `_atribuir_tecnico_glpi()` now assigns
+    a GLPI technician (`GlpiClient.atribuir_tecnico()`, POST `/Ticket_User`
+    type=2) right when the chamado is created — mesa ARRECADAÇÃO -> Léo GLPI
+    id 4988, else -> Sania GLPI id 4816. Same "log warning, don't block"
+    failure mode as the title prefix (ticket already exists in Tiflux by
+    this point; marking 'erro' would duplicate it on reprocess).
+  - `sincronizacao_followups.py`: new `_encerrar_em_cascata()` runs before
+    the status-5 attempt. It's idempotent on retries: `tecnico_atribuido()`
+    /`solucao_registrada()` (both new `GlpiClient` GETs) are checked first,
+    so a technician/solution already present (from ticket creation, or from
+    a previous partially-failed retry) is never re-created. Solution content
+    = the most recent PUBLIC answer (`/answers`, picked by max `answer_time`)
+    from the Tiflux ticket — user's explicit choice, not internal
+    communications, and not "most recent of either type". Falls back to a
+    fixed message (`"Chamado encerrado no Tiflux, sem resposta pública
+    registrada."`) when there are no public answers at all.
+- End-to-end live confirmation on #33736/Tiflux #361499: created via
+  `processar_chamado` -> title prefixed, technician auto-assigned (4988) at
+  creation, confirmed via `GET`. Posted a real public answer in Tiflux,
+  closed the ticket there, ran `_sincronizar_chamado_aberto` directly (single
+  chamado, not the full batch) -> pending answer synced to GLPI first, then
+  technician check skipped (already assigned), solution created with content
+  matching the Tiflux answer exactly (verified via `GET
+  /Ticket/33736/ITILSolution`), status flipped 2 -> 5. Matches the design
+  exactly.
+- Followup authorship (#33733): posted a private followup directly with
+  `users_id=4816` (Sania) via `GlpiClient.criar_followup`, read it back —
+  GLPI stored `users_id: 4816` exactly as sent, not overwritten by the
+  session user. Confirms the item 1 risk from earlier in this file is
+  resolved; no longer a "NEXT" item.
+139 tests, all green.
 
-NEXT: Three GLPI writes across this branch are UNVERIFIED against the real
-API, only against mocks — confirm all three before relying on this in
-production (all are `PUT`/`POST /Ticket` variants, so one disposable/test
-ticket run covers all of them: create a followup with `users_id` set, `PUT`
-status to 5, `PUT` a new title, then `GET /Ticket/<id>` +
-`GET /Ticket/<id>/ITILFollowup` and read every field back):
-1. Does GLPI persist a client-supplied `users_id` on `ITILFollowup`, or
-   overwrite it server-side with the session user?
-2. Does `PUT /Ticket/{id}` with `{"input": {"status": 5}}` actually move the
-   ticket to Solucionado (some setups require solution content first)? If
-   rejected, `encerrar_chamado` retries every cron tick forever — watch the
-   audit table (`tipo='encerramento' AND status='erro'`).
-3. Does `PUT /Ticket/{id}` with `{"input": {"name": ...}}` actually rename
-   the ticket? (Lower risk than #2 — a rejection here only logs a warning,
-   doesn't loop, per the failure-mode decision above.)
-Then commit this session's title-prefix work. Also carry over: commit the
-`.gitignore` fix from the earlier v2 session (still uncommitted there), and
-keep checking `LastTaskResult` on the scheduled task.
+NEXT:
+- Commit this session's work (technician-at-creation +
+  `_encerrar_em_cascata` prep + the `message`-checking fix). Everything in
+  this file's DONE/LIVE-VERIFIED section above is implemented but
+  uncommitted as of this handoff.
+- Chamados synced to Tiflux BEFORE this session's technician-assignment
+  change won't have a GLPI technician yet — their first cascade-close
+  attempt will now auto-assign one via the same idempotent check in
+  `_encerrar_em_cascata()`, so they self-heal on the next followup pass. No
+  action needed, just don't be surprised seeing `atribuir_tecnico` fire for
+  "old" chamados the first time they close.
+- Carry over: commit the `.gitignore` fix from the earlier v2 session (still
+  uncommitted there), and keep checking `LastTaskResult` on the scheduled
+  task.
 
 RISKS:
-- `definir_autor_glpi()` and `definir_tecnico()` both key off mesa but solve
-  different problems — don't conflate them: `definir_tecnico` picks the
-  Tiflux *responsible* (GLPI->Tiflux ticket creation, mesa ARRECADAÇÃO only),
-  `definir_autor_glpi` picks the GLPI *followup author* (Tiflux->GLPI,
-  applies to every mesa).
+- `definir_autor_glpi()` now backs THREE different decisions, all "who
+  represents this mesa in GLPI" but at different moments — followup
+  authorship (Tiflux->GLPI), technician assignment at ticket creation, and
+  technician assignment (if missing) right before cascade-closing. Don't
+  read it as followup-specific anymore; see its docstring.
 - Cascade close/reopen only recognizes ITS OWN status 5 as "closed by
   cascade" — if a human closes a ticket at status 5 manually for unrelated
   reasons, and the Tiflux ticket happens to be open, the next followup pass
   will "reopen" it back to status 2. Narrow but real; flagged, not fixed.
 - `atualizar_titulo()` always prefixes unconditionally — if `_processar()`
   were ever retried on a chamado whose GLPI title already got prefixed (not
-  possible today since a title-update failure no longer raises, but worth
-  remembering if that changes), it would double-prefix
-  (`#T-2 - #T-1 - Problema X`). No guard added since it can't happen with
-  current control flow.
+  possible today since a title-update failure no longer raises), it would
+  double-prefix. No guard added since it can't happen with current control
+  flow.
 - `obter_ticket()` (Tiflux) adds one extra GET per followup-sync pass per
   open chamado; if that call fails, mesa resolves to `None` (falls back to
-  Sania authorship) and the cascade close/reopen check is skipped entirely
-  for that pass (retried next time).
-- Tests mock all I/O (HTTP, Postgres) — they verify orchestration and request
-  shape, not that the real GLPI/Tiflux APIs still behave as documented. Live
-  verification is still needed after any endpoint-facing change (see NEXT).
+  Sania authorship/technician) and the cascade close/reopen check is skipped
+  entirely for that pass (retried next time).
+- `_mensagem_de_recusa()`'s heuristic ("non-empty `message` = failure") is
+  based on every rejection observed live having a message and every success
+  having an empty one — but it's still a heuristic, not documented GLPI
+  behavior. If a future GLPI update adds a non-blocking informational
+  message on success, this would misreport success as failure (safe
+  direction — retries, doesn't silently no-op — but noisy).
 - `/internal_communications` echo prevention depends entirely on the audit
   table (no API-side origin tag) — never manually delete its rows.
 - Log output on this machine still garbles accented characters (mojibake)

@@ -43,11 +43,15 @@ def definir_tecnico(id_mesa: int, config: Config) -> tuple[int | None, str | Non
 
 def definir_autor_glpi(id_mesa: int | None, config: Config) -> int:
     """
-    Define de quem é a autoria (no GLPI) de um followup sincronizado do Tiflux,
-    com base na MESA ATUAL do chamado no Tiflux — não no técnico atribuído lá.
-    Mesa ARRECADAÇÃO sempre vai em nome do Léo; qualquer outra mesa (ou mesa
-    desconhecida/não resolvida) sempre vai em nome da Sania, independente de
-    qual técnico esteja atribuído lá.
+    Regra "quem representa essa mesa no GLPI": mesa ARRECADAÇÃO sempre é o
+    Léo; qualquer outra mesa (ou mesa desconhecida/não resolvida) sempre é a
+    Sania, independente de qual técnico esteja atribuído no Tiflux. Usada em
+    dois lugares:
+    - Autoria (no GLPI) de um followup sincronizado do Tiflux, com base na
+      MESA ATUAL do chamado no Tiflux (sincronizacao_followups.py).
+    - Técnico atribuído no GLPI (Ticket_User tipo 2) na hora de criar o
+      chamado no Tiflux (processamento_chamado.py) — pré-requisito dessa
+      instalação do GLPI pra aceitar status Solucionado/Fechado depois.
     """
     if id_mesa == 37964:  # ARRECADAÇÃO
         return config.id_glpi_leo
