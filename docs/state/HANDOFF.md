@@ -12,6 +12,42 @@ uncommitted):
    other status are never touched.
 3. GLPI title prefix (commit 28f14ce): after a chamado is created in Tiflux,
    the GLPI ticket's title is prefixed with `#<numero_tiflux> - `.
+4. Technician-at-creation + cascade-close técnico/solução prep (commit
+   bebbee8): see LIVE-VERIFIED section below, same commit.
+
+NOT YET COMMITTED — new this session:
+5. Tiflux author name + timestamp prefix on synced content: every followup
+   (public answer or internal communication) synced Tiflux->GLPI, and the
+   solution content used when cascade-closing, now gets prefixed with
+   `<strong>{nome}</strong> ({data} {hora})<br><br>` before the original
+   content — `sincronizacao_followups._prefixar_autor_tiflux()` /
+   `_formatar_data_hora_brasilia()`. This is purely a visual/text marker of
+   WHO ACTUALLY WROTE IT IN TIFLUX; the real GLPI authorship (`users_id` on
+   the followup, or the assigned técnico) still always follows the mesa rule
+   (Léo/Sania via `definir_autor_glpi`) — that part of the design is
+   unchanged, user was explicit about it. Date/time source: `answer_time`
+   (public answers) or `created_at` (internal communications), both UTC from
+   Tiflux, converted to Brasília (UTC-3) by fixed offset (no DST handling —
+   Brazil hasn't used DST since 2019, so this is fine going forward but
+   would need revisiting if that policy ever changes). Missing author falls
+   back to "Desconhecido"; missing/unparseable timestamp just omits the
+   `(data hora)` part instead of failing. 148 tests, all green.
+   Live-verified on real chamado #33724 / Tiflux #361478 (mesa SUPRIMENTOS):
+   José Augusto's real answer synced with content prefixed
+   `<strong>José Augusto Rodrigues</strong> (09/09/2026 11:26)<br><br>...`,
+   `users_id` on the followup still 4816 (Sania, per mesa rule) — confirms
+   author display and real authorship are correctly decoupled.
+
+IMPORTANT OPERATIONAL FACT discovered this session: the Windows Scheduled
+Task `GLPI-Tiflux-Sync` runs `python glpi_tiflux.py` directly from THIS
+working directory (`C:\Users\LeoAlves43\Desktop\api-glpi-tiflux`) every 5
+minutes — not from a separately deployed copy. That means every code change
+made in this session, committed or not, has been executed live against
+production GLPI/Tiflux on every 5-minute tick since it was saved, across ALL
+already-synced chamados (not just the ones manually tested here). User was
+told and explicitly chose to keep working this way rather than pause the
+task. Worth remembering for future sessions on this repo: uncommitted edits
+here are not "safe to experiment" — they go live within 5 minutes.
 
 LIVE-VERIFIED THIS SESSION (real chamados #33630, #33733, #33736 on the
 production GLPI/Tiflux — not just mocks) — and found + fixed a real bug in
@@ -66,10 +102,11 @@ the process:
 139 tests, all green.
 
 NEXT:
-- Commit this session's work (technician-at-creation +
-  `_encerrar_em_cascata` prep + the `message`-checking fix). Everything in
-  this file's DONE/LIVE-VERIFIED section above is implemented but
-  uncommitted as of this handoff.
+- Commit this session's work (author-name/timestamp prefix on synced
+  content). Everything in item 5 above is implemented, live-verified, and
+  uncommitted as of this handoff — but is ALREADY RUNNING IN PRODUCTION per
+  the operational fact above, so committing is bookkeeping, not a deploy
+  step.
 - Chamados synced to Tiflux BEFORE this session's technician-assignment
   change won't have a GLPI technician yet — their first cascade-close
   attempt will now auto-assign one via the same idempotent check in

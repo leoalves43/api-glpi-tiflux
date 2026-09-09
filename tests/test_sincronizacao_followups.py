@@ -4,6 +4,8 @@ import unittest
 
 from sync.config import Config
 from sync.sincronizacao_followups import (
+    _formatar_data_hora_brasilia,
+    _prefixar_autor_tiflux,
     sincronizar_followups,
     sincronizar_followups_glpi_para_tiflux,
     sincronizar_followups_tiflux_para_glpi,
@@ -19,6 +21,31 @@ _CONFIG = Config(
     db_host="", db_port="5432", db_name="", db_user="", db_password="",
     tabela_auditoria="x", tabela_followups="y",
 )
+
+
+class TestFormatarDataHoraBrasilia(unittest.TestCase):
+    def test_converte_utc_para_brasilia(self):
+        self.assertEqual(_formatar_data_hora_brasilia("2026-09-09T14:10:26Z"), "09/09/2026 11:10")
+
+    def test_none_retorna_none(self):
+        self.assertIsNone(_formatar_data_hora_brasilia(None))
+
+    def test_formato_invalido_retorna_none(self):
+        self.assertIsNone(_formatar_data_hora_brasilia("não é uma data"))
+
+
+class TestPrefixarAutorTiflux(unittest.TestCase):
+    def test_com_nome_e_data(self):
+        resultado = _prefixar_autor_tiflux("José Augusto", "2026-09-09T14:10:26Z", "conteúdo")
+        self.assertEqual(resultado, "<strong>José Augusto</strong> (09/09/2026 11:10)<br><br>conteúdo")
+
+    def test_sem_nome_usa_desconhecido(self):
+        resultado = _prefixar_autor_tiflux(None, "2026-09-09T14:10:26Z", "conteúdo")
+        self.assertTrue(resultado.startswith("<strong>Desconhecido</strong>"))
+
+    def test_sem_data_omite_parenteses(self):
+        resultado = _prefixar_autor_tiflux("José Augusto", None, "conteúdo")
+        self.assertEqual(resultado, "<strong>José Augusto</strong><br><br>conteúdo")
 
 
 class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
@@ -81,11 +108,31 @@ class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.glpi.followups_criados[0]["is_private"], 0)
 
+    def test_resposta_publica_e_prefixada_com_autor_e_data_em_negrito(self):
+        self.tiflux.respostas = [{"id": 1, "name": "resp", "author": "José Augusto", "answer_time": "2026-09-09T14:10:26Z"}]
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        conteudo = self.glpi.followups_criados[0]["conteudo"]
+        self.assertEqual(conteudo, "<strong>José Augusto</strong> (09/09/2026 11:10)<br><br>resp")
+        # autoria real no GLPI (users_id) continua seguindo a mesa, não o autor exibido no texto
+        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
+
     def test_comunicacao_interna_vira_followup_privado_no_glpi(self):
         self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
         sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.glpi.followups_criados[0]["is_private"], 1)
+
+    def test_comunicacao_interna_e_prefixada_com_autor_e_data_em_negrito(self):
+        self.tiflux.comunicacoes = [{"id": 2, "text": "com", "user": {"name": "Sania Almeida"}, "created_at": "2026-09-09T14:10:26Z"}]
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        conteudo = self.glpi.followups_criados[0]["conteudo"]
+        self.assertEqual(conteudo, "<strong>Sania Almeida</strong> (09/09/2026 11:10)<br><br>com")
+
+    def test_sem_autor_ou_data_usa_desconhecido_e_omite_parenteses(self):
+        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        conteudo = self.glpi.followups_criados[0]["conteudo"]
+        self.assertEqual(conteudo, "<strong>Desconhecido</strong><br><br>resp")
 
     def test_mesa_arrecadacao_atribui_followup_ao_leo_no_glpi(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
@@ -218,14 +265,16 @@ class TestPreparacaoEncerramentoCascata(unittest.TestCase):
         sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
         self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [])
 
-    def test_registra_ultima_resposta_publica_como_solucao(self):
+    def test_registra_ultima_resposta_publica_como_solucao_prefixada_com_autor_e_data(self):
         self.tiflux.respostas = [
-            {"id": 1, "name": "primeira resposta", "answer_time": "2026-09-01T10:00:00Z"},
-            {"id": 2, "name": "resposta mais recente", "answer_time": "2026-09-05T10:00:00Z"},
+            {"id": 1, "name": "primeira resposta", "answer_time": "2026-09-01T10:00:00Z", "author": "Fulano"},
+            {"id": 2, "name": "resposta mais recente", "answer_time": "2026-09-05T10:00:00Z", "author": "José Augusto"},
         ]
         conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
         sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
-        self.assertEqual(self.glpi.solucoes_registradas, [(1, "resposta mais recente")])
+        conteudo = self.glpi.solucoes_registradas[0][1]
+        self.assertIn("<strong>José Augusto</strong> (05/09/2026 07:00)", conteudo)
+        self.assertIn("resposta mais recente", conteudo)
 
     def test_sem_resposta_publica_usa_texto_padrao(self):
         conn = FakeConnection(respostas=[[(1, "T-1")], [], []])

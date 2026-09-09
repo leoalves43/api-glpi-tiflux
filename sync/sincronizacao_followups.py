@@ -1,6 +1,7 @@
 """Sincronização bidirecional de followups/respostas entre GLPI e Tiflux."""
 
 import html
+from datetime import datetime, timedelta
 
 from sync import db_followups
 from sync.config import Config, log
@@ -18,6 +19,32 @@ STATUS_GLPI_SOLUCIONADO = 5
 # Status pra onde o chamado GLPI volta quando um encerramento em cascata
 # anterior é desfeito porque o ticket foi reaberto no Tiflux
 STATUS_GLPI_REABERTO = 2  # Processando (atribuído)
+
+
+def _prefixar_autor_tiflux(nome: str | None, timestamp_utc: str | None, conteudo: str) -> str:
+    """
+    Prefixa o conteúdo com o nome de quem respondeu de fato no Tiflux (em
+    negrito) e a data/hora do assentamento — a autoria real no GLPI
+    (users_id) segue a regra de mesa (Léo/Sania, ver definir_autor_glpi), não
+    o técnico do Tiflux, então esse prefixo é a única forma de identificar
+    quem respondeu de verdade dentro do texto.
+    """
+    cabecalho = f"<strong>{nome or 'Desconhecido'}</strong>"
+    data_hora = _formatar_data_hora_brasilia(timestamp_utc)
+    if data_hora:
+        cabecalho += f" ({data_hora})"
+    return f"{cabecalho}<br><br>{conteudo}"
+
+
+def _formatar_data_hora_brasilia(timestamp_utc: str | None) -> str | None:
+    """Converte um timestamp UTC do Tiflux (ex.: "2026-09-09T14:10:26Z") pra "dd/mm/aaaa hh:mm" em horário de Brasília (UTC-3)."""
+    if not timestamp_utc:
+        return None
+    try:
+        dt_utc = datetime.strptime(timestamp_utc, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return None
+    return (dt_utc - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
 
 
 def sincronizar_followups(conn, config: Config, glpi: GlpiClient, tiflux: TifluxClient) -> None:
@@ -121,12 +148,13 @@ def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, i
 
 
 def _ultima_resposta_publica_tiflux(tiflux: TifluxClient, numero_tiflux: str, config: Config) -> str:
-    """A resposta pública (/answers) mais recente do ticket no Tiflux, por answer_time, vira o conteúdo da solução no GLPI."""
+    """A resposta pública (/answers) mais recente do ticket no Tiflux, por answer_time, vira o conteúdo da solução no GLPI (prefixada com autor+data, mesmo padrão dos followups)."""
     respostas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
     if not respostas:
         return _SEM_RESPOSTA_TIFLUX
     mais_recente = max(respostas, key=lambda r: r.get("answer_time") or "")
-    return html.unescape(mais_recente.get("name") or "") or _SEM_RESPOSTA_TIFLUX
+    conteudo = html.unescape(mais_recente.get("name") or "") or _SEM_RESPOSTA_TIFLUX
+    return _prefixar_autor_tiflux(mais_recente.get("author"), mais_recente.get("answer_time"), conteudo)
 
 
 def _mudar_status_em_cascata(conn, config, glpi: GlpiClient, id_glpi, numero_tiflux, novo_status: int, tipo: str, mensagem_sucesso: str, totais) -> None:
@@ -281,6 +309,7 @@ def _publicar_respostas_publicas(conn, config, glpi: GlpiClient, id_chamado, num
             continue
         id_origem = resposta.get("id")
         conteudo = html.unescape(resposta.get("name") or "")
+        conteudo = _prefixar_autor_tiflux(resposta.get("author"), resposta.get("answer_time"), conteudo)
         id_criado, erro = glpi.criar_followup(id_chamado, conteudo, is_private=0, users_id=id_autor_glpi)
         sucesso = _registrar_followup_tiflux_para_glpi(
             conn, config, id_chamado, numero_tiflux, "publica", id_origem, id_criado, erro,
@@ -297,6 +326,8 @@ def _publicar_comunicacoes_internas(conn, config, glpi: GlpiClient, id_chamado, 
         if id_origem in ja_processados_ou_proprios:
             continue
         conteudo = html.unescape(comunicacao.get("text") or "")
+        nome_autor = (comunicacao.get("user") or {}).get("name")
+        conteudo = _prefixar_autor_tiflux(nome_autor, comunicacao.get("created_at"), conteudo)
         id_criado, erro = glpi.criar_followup(id_chamado, conteudo, is_private=1, users_id=id_autor_glpi)
         sucesso = _registrar_followup_tiflux_para_glpi(
             conn, config, id_chamado, numero_tiflux, "interna", id_origem, id_criado, erro,
