@@ -56,6 +56,14 @@ class Config:
     # Quantos chamados buscar por execução do cron (aumente se ficar tickets p/ trás)
     tamanho_pagina_busca: int = 200
 
+    # Quantos IDs "voltar" a partir do maior id_glpi já registrado antes de
+    # sondar pra frente. Um chamado pode devolver 404 na hora exata da sondagem
+    # (ainda não commitado no GLPI, ou temporariamente na lixeira) e nunca mais
+    # ser revisitado, já que a sondagem normalmente só avança a partir do maior
+    # ID já visto (chamado #33769 ficou órfão assim). Essa janela faz cada
+    # execução reconferir os últimos N IDs abaixo do máximo também.
+    janela_releitura_sondagem: int = 50
+
     # Quantos chamados já sincronizados varrer por execução em busca de followups novos
     tamanho_pagina_followups: int = 50
 

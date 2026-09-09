@@ -10,6 +10,7 @@ _CONFIG = Config(
     db_host="", db_port="5432", db_name="", db_user="", db_password="",
     tabela_auditoria="siap.api_glpi_tiflux", tabela_followups="siap.api_glpi_tiflux_followups",
     id_minimo_glpi=33637,
+    janela_releitura_sondagem=50,
 )
 
 
@@ -28,9 +29,13 @@ class TestObterProximoIdParaSondar(unittest.TestCase):
         conn = FakeConnection(respostas=[[(100,)]])
         self.assertEqual(db_chamados.obter_proximo_id_para_sondar(conn, _CONFIG), 33637)
 
-    def test_continua_apos_o_maior_id_registrado(self):
+    def test_recua_a_janela_de_releitura_a_partir_do_maior_id_registrado(self):
         conn = FakeConnection(respostas=[[(40000,)]])
-        self.assertEqual(db_chamados.obter_proximo_id_para_sondar(conn, _CONFIG), 40001)
+        self.assertEqual(db_chamados.obter_proximo_id_para_sondar(conn, _CONFIG), 40001 - 50)
+
+    def test_recuo_nunca_fica_abaixo_do_id_minimo(self):
+        conn = FakeConnection(respostas=[[(33660,)]])
+        self.assertEqual(db_chamados.obter_proximo_id_para_sondar(conn, _CONFIG), 33637)
 
 
 class TestObterIdsParaRetry(unittest.TestCase):
