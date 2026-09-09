@@ -266,10 +266,11 @@ class GlpiClient:
             return lista_emails[0].get("email")
         return None
 
-    def chamado_tem_grupo_observador(self, id_chamado: int, id_grupo_observador: int) -> tuple[bool, str | None]:
+    def chamado_tem_grupo_observador(self, id_chamado: int, ids_grupo_observador: tuple[int, ...]) -> tuple[bool, str | None]:
         """
-        Confere se id_grupo_observador está vinculado ao chamado como OBSERVADOR
-        (type=3 em Group_Ticket, conforme GLPI: 1=Requerente, 2=Atribuído, 3=Observador).
+        Confere se algum ID de ids_grupo_observador está vinculado ao chamado
+        como OBSERVADOR (type=3 em Group_Ticket, conforme GLPI: 1=Requerente,
+        2=Atribuído, 3=Observador).
         Retorna (bool, motivo_se_nao_encontrado_ou_erro).
         """
         resp = self._get(f"/Ticket/{id_chamado}/Group_Ticket")
@@ -277,10 +278,10 @@ class GlpiClient:
             return False, f"Falha ao consultar grupos do chamado no GLPI (status {resp.status_code})"
 
         for vinculo in resp.json():
-            if vinculo.get("type") == 3 and vinculo.get("groups_id") == id_grupo_observador:
+            if vinculo.get("type") == 3 and vinculo.get("groups_id") in ids_grupo_observador:
                 return True, None
 
-        return False, f"Chamado não tem o grupo observador ID {id_grupo_observador}"
+        return False, f"Chamado não tem nenhum dos grupos observadores {ids_grupo_observador}"
 
     def obter_anexos(self, id_chamado: int, tamanho_maximo_mb: int) -> tuple[list[Anexo], list[str]]:
         """

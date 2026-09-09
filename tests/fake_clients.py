@@ -25,7 +25,7 @@ class FakeGlpiClient:
         self.resultado_registrar_solucao: tuple[bool, str | None] = (True, None)
         self.ja_tem_solucao: dict[int, bool] = {}
 
-    def chamado_tem_grupo_observador(self, id_chamado, id_grupo_observador):
+    def chamado_tem_grupo_observador(self, id_chamado, ids_grupo_observador):
         return self.grupo_observador.get(id_chamado, (True, None))
 
     def obter_ticket(self, id_chamado):

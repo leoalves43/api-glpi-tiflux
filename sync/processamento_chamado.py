@@ -78,7 +78,7 @@ def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamad
 
 
 def _validar_escopo(glpi: GlpiClient, config: Config, id_chamado: int) -> None:
-    esta_no_escopo, motivo = glpi.chamado_tem_grupo_observador(id_chamado, config.id_grupo_observador)
+    esta_no_escopo, motivo = glpi.chamado_tem_grupo_observador(id_chamado, config.ids_grupo_observador)
     if not esta_no_escopo:
         raise _ChamadoNaoSincronizavel("ignorado", motivo)
 

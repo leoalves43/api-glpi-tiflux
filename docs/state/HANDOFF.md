@@ -1,6 +1,6 @@
 # Handoff
 
-DONE (branch v3, pushed to origin/v3 up to 28f14ce; this session's work below is
+DONE (branch v3, pushed to origin/v3 up to a829fca; this session's work below is
 uncommitted):
 1. Followup authorship fix (commit 6440843): Tiflux->GLPI followups send
    `users_id` (mesa ARRECADAÇÃO -> Léo GLPI id 4988, any other mesa -> Sania
@@ -14,9 +14,18 @@ uncommitted):
    the GLPI ticket's title is prefixed with `#<numero_tiflux> - `.
 4. Technician-at-creation + cascade-close técnico/solução prep (commit
    bebbee8): see LIVE-VERIFIED section below, same commit.
+5. Tiflux author name + timestamp prefix on synced content (commit a829fca):
+   see LIVE-VERIFIED section below, same commit.
 
 NOT YET COMMITTED — new this session:
-5. Tiflux author name + timestamp prefix on synced content: every followup
+6. Sync scope widened from GLPI group observer 22 (EMBRAS - Atendimentos)
+   only, to group 21 (EMBRAS - Backlog) OR 22 — `Config.id_grupo_observador`
+   (single int) became `ids_grupo_observador: tuple[int, ...] = (21, 22)`,
+   `GlpiClient.chamado_tem_grupo_observador()` now checks membership. Live-
+   confirmed group 21 exists in GLPI, named "EMBRAS - Backlog" as described.
+   150 tests, all green.
+
+Details on item 5, Tiflux author name + timestamp prefix on synced content: every followup
    (public answer or internal communication) synced Tiflux->GLPI, and the
    solution content used when cascade-closing, now gets prefixed with
    `<strong>{nome}</strong> ({data} {hora})<br><br>` before the original
@@ -99,14 +108,16 @@ the process:
   GLPI stored `users_id: 4816` exactly as sent, not overwritten by the
   session user. Confirms the item 1 risk from earlier in this file is
   resolved; no longer a "NEXT" item.
-139 tests, all green.
+139 tests, all green (now 150 with item 6's tests added).
+
+Also live-verified: item 6 (group observer 21+22) — `GET /Group/21` confirmed
+it exists in GLPI, named "EMBRAS - Backlog" as described.
 
 NEXT:
-- Commit this session's work (author-name/timestamp prefix on synced
-  content). Everything in item 5 above is implemented, live-verified, and
-  uncommitted as of this handoff — but is ALREADY RUNNING IN PRODUCTION per
-  the operational fact above, so committing is bookkeeping, not a deploy
-  step.
+- Commit this session's remaining work (item 6, group observer widening).
+  Everything above is implemented and uncommitted as of this handoff — but
+  ALREADY RUNNING IN PRODUCTION per the operational fact above, so
+  committing is bookkeeping, not a deploy step.
 - Chamados synced to Tiflux BEFORE this session's technician-assignment
   change won't have a GLPI technician yet — their first cascade-close
   attempt will now auto-assign one via the same idempotent check in

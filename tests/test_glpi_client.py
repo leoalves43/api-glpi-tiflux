@@ -257,7 +257,15 @@ class TestChamadoTemGrupoObservador(unittest.TestCase):
         fake = FakeRequests()
         fake.programar("GET", "/Group_Ticket", FakeResponse(200, [{"type": 3, "groups_id": 22}]))
         with patch("sync.glpi_client.requests", fake):
-            ok, motivo = _client(fake).chamado_tem_grupo_observador(1, 22)
+            ok, motivo = _client(fake).chamado_tem_grupo_observador(1, (21, 22))
+        self.assertTrue(ok)
+        self.assertIsNone(motivo)
+
+    def test_encontrado_via_outro_grupo_da_lista(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Group_Ticket", FakeResponse(200, [{"type": 3, "groups_id": 21}]))
+        with patch("sync.glpi_client.requests", fake):
+            ok, motivo = _client(fake).chamado_tem_grupo_observador(1, (21, 22))
         self.assertTrue(ok)
         self.assertIsNone(motivo)
 
@@ -265,9 +273,16 @@ class TestChamadoTemGrupoObservador(unittest.TestCase):
         fake = FakeRequests()
         fake.programar("GET", "/Group_Ticket", FakeResponse(200, [{"type": 1, "groups_id": 22}]))
         with patch("sync.glpi_client.requests", fake):
-            ok, motivo = _client(fake).chamado_tem_grupo_observador(1, 22)
+            ok, motivo = _client(fake).chamado_tem_grupo_observador(1, (21, 22))
         self.assertFalse(ok)
         self.assertIn("22", motivo)
+
+    def test_nenhum_grupo_da_lista_presente(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Group_Ticket", FakeResponse(200, [{"type": 3, "groups_id": 99}]))
+        with patch("sync.glpi_client.requests", fake):
+            ok, motivo = _client(fake).chamado_tem_grupo_observador(1, (21, 22))
+        self.assertFalse(ok)
 
 
 class TestObterRequerente(unittest.TestCase):

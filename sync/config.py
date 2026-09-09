@@ -66,8 +66,8 @@ class Config:
     cliente_tiflux_id: int = 762707
     id_solicitante_padrao: int = 3758056  # Ju STII
 
-    # Só sincroniza chamados que tenham esse grupo como OBSERVADOR no GLPI
-    id_grupo_observador: int = 22  # Embras Atendimentos
+    # Só sincroniza chamados que tenham algum desses grupos como OBSERVADOR no GLPI
+    ids_grupo_observador: tuple[int, ...] = (21, 22)  # EMBRAS - Backlog, EMBRAS - Atendimentos
 
     id_tecnico_leo: int = 117180
 
