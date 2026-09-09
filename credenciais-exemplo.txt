@@ -1,9 +1,16 @@
-NÃO ALTERAR NOME DOS PARAMETROS, POIS É UTILIZADO DIRETO NO CODIGO
-ALTERAR SOMENTE OS DADOS APÓS O SINAL DE =
 
-URL_GLPI = https://URLdoGLPI/apirest.php
-APP_TOKEN = token-app-gerado-no-glpi
-USER_TOKEN = seu_token_gerado_no_tiflux
+URL_GLPI= https://url_do_glpi/apirest.php
+APP_TOKEN=
+USER_TOKEN=
 
-URL_TIFLUX = https://api.tiflux.com/api/v2
-TOKEN_TIFLUX = seu_token_gerado_no_tiflux
+
+URL_TIFLUX=https://api.tiflux.com/api/v2
+TOKEN_TIFLUX=
+
+DB_HOST=
+DB_PORT=
+DB_NAME=
+DB_USER=
+DB_PASSWORD=
+DB_SCHEMA=
+DB_TABLE=api_glpi_tiflux
