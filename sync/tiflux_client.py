@@ -110,9 +110,15 @@ class TifluxClient:
         return self._id_solicitante_padrao, "Ju STII (Padrão - Falha ao Auto-Cadastrar no TiFlux)"
 
     def criar_ticket(self, form_data: dict[str, str]) -> tuple[str | None, str | None]:
-        """Retorna (ticket_number, erro_ou_None)."""
+        """
+        Retorna (ticket_number, erro_ou_None).
+        207 é sucesso, não erro: é o status que o Tiflux usa quando a requisição
+        inclui "entities" (campos personalizados) — o ticket é criado de qualquer
+        forma, e "entities_errors" (se não vier null) descreve só os campos que
+        falharam, sem invalidar a criação do ticket em si.
+        """
         resp = requests.post(f"{self._url_base}/tickets", data=form_data, headers=self._headers_form)
-        if resp.status_code not in (200, 201):
+        if resp.status_code not in (200, 201, 207):
             return None, f"Falha ao criar ticket no Tiflux ({resp.status_code}): {resp.text}"
 
         dados_retorno = resp.json()
@@ -122,6 +128,9 @@ class TifluxClient:
 
         if not ticket_number:
             return None, "Ticket criado, mas não foi possível identificar o ticket_number na resposta"
+
+        if isinstance(dados_retorno, dict) and dados_retorno.get("entities_errors"):
+            log(f"⚠️ Ticket #{ticket_number} criado, mas campos personalizados falharam: {dados_retorno['entities_errors']}")
 
         return ticket_number, None
 

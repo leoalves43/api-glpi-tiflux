@@ -106,6 +106,25 @@ class TestCriarTicket(unittest.TestCase):
         self.assertIsNone(numero)
         self.assertIsNotNone(erro)
 
+    def test_207_com_entities_e_sucesso_nao_erro(self):
+        """207 é o status do Tiflux quando a requisição inclui "entities" (campos
+        personalizados) e o ticket é criado com sucesso — não é uma falha HTTP."""
+        fake = FakeRequests()
+        fake.programar("POST", "/tickets", FakeResponse(207, {"entities_errors": None, "ticket": {"ticket_number": "T-1"}}))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().criar_ticket({"title": "x"})
+        self.assertEqual((numero, erro), ("T-1", None))
+
+    def test_207_com_falha_em_entities_ainda_e_sucesso(self):
+        fake = FakeRequests()
+        fake.programar("POST", "/tickets", FakeResponse(207, {
+            "entities_errors": [{"entity_field_id": 35107, "error": "boom"}],
+            "ticket": {"ticket_number": "T-1"},
+        }))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().criar_ticket({"title": "x"})
+        self.assertEqual((numero, erro), ("T-1", None))
+
 
 class TestAtribuirTecnico(unittest.TestCase):
     def test_sucesso_no_change_responsible(self):
