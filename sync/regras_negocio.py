@@ -20,7 +20,7 @@ def depara_categoria(cat_id: int | None) -> int | None:
     se a categoria não tiver correspondência conhecida — nesse caso o chamado
     NÃO é sincronizado automaticamente, fica registrado como erro pra revisão manual.
     """
-    if cat_id in range(267, 272):
+    if cat_id == 233 or cat_id in range(267, 272):
         return 37963  # ADMINISTRATIVO/RH
     if cat_id in range(272, 277):
         return 37964  # ARRECADAÇÃO

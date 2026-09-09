@@ -23,6 +23,9 @@ class TestDeparaCategoria(unittest.TestCase):
         self.assertEqual(depara_categoria(267), 37963)
         self.assertEqual(depara_categoria(271), 37963)
 
+    def test_categoria_233_e_administrativo(self):
+        self.assertEqual(depara_categoria(233), 37963)
+
     def test_limites_arrecadacao(self):
         self.assertEqual(depara_categoria(272), 37964)
         self.assertEqual(depara_categoria(276), 37964)
