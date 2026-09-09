@@ -32,18 +32,20 @@ class TestValidarMesaDoCliente(unittest.TestCase):
             self.assertTrue(_client().validar_mesa_do_cliente(37963))
 
 
-class TestObterMesaDoTicket(unittest.TestCase):
-    def test_retorna_id_da_mesa_atual(self):
+class TestObterTicket(unittest.TestCase):
+    def test_encontrado_retorna_dados_e_status(self):
         fake = FakeRequests()
-        fake.programar("GET", "/tickets/T-1", FakeResponse(200, {"desk": {"id": 37964}}))
+        fake.programar("GET", "/tickets/T-1", FakeResponse(200, {"desk": {"id": 37964}, "is_closed": False}))
         with patch("sync.tiflux_client.requests", fake):
-            self.assertEqual(_client().obter_mesa_do_ticket("T-1"), 37964)
+            ticket, status = _client().obter_ticket("T-1")
+        self.assertEqual((ticket["desk"]["id"], status), (37964, 200))
 
-    def test_falha_http_retorna_none(self):
+    def test_falha_http_retorna_none_e_status(self):
         fake = FakeRequests()
         fake.programar("GET", "/tickets/T-1", FakeResponse(500, text="erro"))
-        with patch("sync.tiflux_client.requests", fake), _sem_console():
-            self.assertIsNone(_client().obter_mesa_do_ticket("T-1"))
+        with patch("sync.tiflux_client.requests", fake):
+            ticket, status = _client().obter_ticket("T-1")
+        self.assertEqual((ticket, status), (None, 500))
 
 
 class TestObterIdSolicitante(unittest.TestCase):

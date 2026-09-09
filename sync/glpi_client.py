@@ -126,6 +126,18 @@ class GlpiClient:
 
         return id_criado, None
 
+    def encerrar_chamado(self, id_chamado: int, status: int) -> tuple[bool, str | None]:
+        """
+        PUT /Ticket/{id} pra mudar o status do chamado (ex.: encerramento em
+        cascata quando o ticket correspondente foi fechado no Tiflux).
+        Retorna (sucesso, erro_ou_None).
+        """
+        payload = {"input": {"status": status}}
+        resp = requests.put(f"{self._url_base}/Ticket/{id_chamado}", json=payload, headers=self._headers)
+        if resp.status_code not in (200, 201):
+            return False, f"Falha ao encerrar chamado #{id_chamado} no GLPI ({resp.status_code}): {resp.text}"
+        return True, None
+
     def obter_requerente(self, id_chamado: int, ticket: dict) -> tuple[str, str | None, int | None]:
         """Resolve nome, e-mail e id do requerente (Ticket_User type=1) de um chamado."""
         id_requerente = self._id_requerente(id_chamado, ticket)

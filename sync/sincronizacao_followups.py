@@ -11,6 +11,14 @@ from sync.tiflux_client import TifluxClient
 # Status de chamado no GLPI considerados "aberto" (Novo/Processando/Pendente)
 STATUS_GLPI_ABERTOS = (1, 2, 3, 4)
 
+# Status pra onde o chamado GLPI vai quando o ticket correspondente é
+# fechado ou cancelado no Tiflux (encerramento em cascata)
+STATUS_GLPI_SOLUCIONADO = 5
+
+# Status pra onde o chamado GLPI volta quando um encerramento em cascata
+# anterior é desfeito porque o ticket foi reaberto no Tiflux
+STATUS_GLPI_REABERTO = 2  # Processando (atribuído)
+
 
 def sincronizar_followups(conn, config: Config, glpi: GlpiClient, tiflux: TifluxClient) -> None:
     """
@@ -23,33 +31,89 @@ def sincronizar_followups(conn, config: Config, glpi: GlpiClient, tiflux: Tiflux
     if not chamados:
         return
 
-    totais = {"g2t_sucesso": 0, "g2t_erro": 0, "t2g_sucesso": 0, "t2g_erro": 0}
+    totais = {"g2t_sucesso": 0, "g2t_erro": 0, "t2g_sucesso": 0, "t2g_erro": 0, "status_sucesso": 0, "status_erro": 0}
     for id_glpi, numero_tiflux in chamados:
         if numero_tiflux:
             _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tiflux, totais)
 
     log(f"Followups. GLPI->Tiflux: {totais['g2t_sucesso']} ok / {totais['g2t_erro']} erro | "
-        f"Tiflux->GLPI: {totais['t2g_sucesso']} ok / {totais['t2g_erro']} erro")
+        f"Tiflux->GLPI: {totais['t2g_sucesso']} ok / {totais['t2g_erro']} erro | "
+        f"Encerramento/reabertura em cascata: {totais['status_sucesso']} ok / {totais['status_erro']} erro")
 
 
 def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tiflux, totais) -> None:
-    ticket, status_code = glpi.obter_ticket(id_glpi)
-    if ticket is None:
+    ticket_glpi, status_code = glpi.obter_ticket(id_glpi)
+    if ticket_glpi is None:
         log(f"⚠️ Não foi possível conferir status do chamado #{id_glpi} no GLPI "
             f"(status {status_code}) — pulado nesta execução")
         return
 
-    if ticket.get("status") not in STATUS_GLPI_ABERTOS:
-        db_followups.registrar_chamado_fechado_para_followups(conn, config, id_glpi)
+    ticket_tiflux, _ = tiflux.obter_ticket(numero_tiflux)
+
+    if ticket_glpi.get("status") not in STATUS_GLPI_ABERTOS:
+        _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, ticket_glpi, ticket_tiflux, totais)
         return
 
     s, e = sincronizar_followups_glpi_para_tiflux(conn, config, glpi, tiflux, id_glpi, numero_tiflux)
     totais["g2t_sucesso"] += s
     totais["g2t_erro"] += e
 
-    s, e = sincronizar_followups_tiflux_para_glpi(conn, config, glpi, tiflux, id_glpi, numero_tiflux)
+    s, e = sincronizar_followups_tiflux_para_glpi(conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux)
     totais["t2g_sucesso"] += s
     totais["t2g_erro"] += e
+
+    if ticket_tiflux and ticket_tiflux.get("is_closed"):
+        _mudar_status_em_cascata(
+            conn, config, glpi, id_glpi, numero_tiflux, STATUS_GLPI_SOLUCIONADO, "encerramento",
+            f"Chamado #{id_glpi} encerrado no GLPI (status Solucionado) — fechado/cancelado no Tiflux #{numero_tiflux}",
+            totais,
+        )
+
+
+def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, ticket_glpi, ticket_tiflux, totais) -> None:
+    """
+    Chamado já não está mais "aberto" no GLPI. Normalmente é porque um
+    encerramento em cascata anterior já rodou (status Solucionado) — nesse
+    caso, se o ticket foi REABERTO no Tiflux nesse meio tempo, desfaz o
+    encerramento (volta pra Processando) pra followups voltarem a sincronizar
+    na próxima execução. Fechamentos manuais no GLPI (ex.: status Fechado,
+    feito por um técnico direto lá) não são mexidos — só reabrimos o que a
+    própria integração fechou.
+    """
+    reabrir = (
+        ticket_glpi.get("status") == STATUS_GLPI_SOLUCIONADO
+        and ticket_tiflux is not None
+        and not ticket_tiflux.get("is_closed")
+    )
+    if reabrir:
+        _mudar_status_em_cascata(
+            conn, config, glpi, id_glpi, numero_tiflux, STATUS_GLPI_REABERTO, "reabertura",
+            f"Chamado #{id_glpi} reaberto no GLPI (status Processando) — reaberto no Tiflux #{numero_tiflux}",
+            totais,
+        )
+        return
+
+    db_followups.registrar_chamado_fechado_para_followups(conn, config, id_glpi)
+
+
+def _mudar_status_em_cascata(conn, config, glpi: GlpiClient, id_glpi, numero_tiflux, novo_status: int, tipo: str, mensagem_sucesso: str, totais) -> None:
+    """
+    Aplica uma mudança de status no GLPI espelhando o estado do ticket no
+    Tiflux (encerramento ou reabertura). Sem bookkeeping de "já processado":
+    se falhar, a condição que disparou a chamada (is_closed no Tiflux
+    divergindo do status no GLPI) continua valendo e é retentada na próxima
+    execução; se der certo, o status do GLPI muda e a condição deixa de valer.
+    Uma única linha por chamado na tabela de auditoria (direcao=
+    'tiflux_para_glpi', id_origem=-id_glpi) guarda a última ação de cascata,
+    seja ela encerramento ou reabertura.
+    """
+    sucesso, erro = glpi.encerrar_chamado(id_glpi, novo_status)
+    mensagem = mensagem_sucesso if sucesso else erro
+    db_followups.registrar_resultado_followup(
+        conn, config, id_glpi, numero_tiflux, "tiflux_para_glpi", tipo, -id_glpi, None,
+        "sucesso" if sucesso else "erro", mensagem,
+    )
+    totais["status_sucesso" if sucesso else "status_erro"] += 1
 
 
 # --- GLPI -> Tiflux -----------------------------------------------------
@@ -142,6 +206,7 @@ def _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tip
 
 def sincronizar_followups_tiflux_para_glpi(
     conn, config: Config, glpi: GlpiClient, tiflux: TifluxClient, id_chamado: int, numero_tiflux: str,
+    ticket_tiflux: dict | None,
 ) -> tuple[int, int]:
     """
     Busca respostas públicas (/answers) e comunicações internas
@@ -150,11 +215,13 @@ def sincronizar_followups_tiflux_para_glpi(
     followup correspondente no GLPI pra cada uma.
 
     A autoria do followup no GLPI é definida pela MESA ATUAL do chamado no
-    Tiflux, não pelo técnico atribuído lá (ver definir_autor_glpi) — sem isso,
-    o GLPI atribui tudo ao usuário autenticado da API, independente de quem
-    respondeu de fato no Tiflux. A mesa é consultada a cada chamada (não
-    reaproveitada da criação do ticket) porque tickets podem ser movidos de
-    mesa depois — followups sempre seguem a mesa de agora.
+    Tiflux (campo `desk` de ticket_tiflux), não pelo técnico atribuído lá (ver
+    definir_autor_glpi) — sem isso, o GLPI atribui tudo ao usuário autenticado
+    da API, independente de quem respondeu de fato no Tiflux. `ticket_tiflux`
+    vem de uma consulta feita a cada chamada pelo caller (não reaproveitada da
+    criação do ticket), porque tickets podem ser movidos de mesa depois —
+    followups sempre seguem a mesa de agora. Pode vir None se essa consulta
+    falhou; nesse caso cai no autor padrão (Sania, ver definir_autor_glpi).
 
     Defesa contra eco: a tabela de auditoria (id já processado ou já criado por
     nós) é o mecanismo primário, único disponível pra /internal_communications.
@@ -162,7 +229,7 @@ def sincronizar_followups_tiflux_para_glpi(
     de defesa adicional.
     Retorna (qtd_sucesso, qtd_erro).
     """
-    id_mesa = tiflux.obter_mesa_do_ticket(numero_tiflux)
+    id_mesa = ((ticket_tiflux or {}).get("desk") or {}).get("id")
     id_autor_glpi = definir_autor_glpi(id_mesa, config)
 
     ja_processados_ou_proprios = db_followups.obter_respostas_tiflux_ja_processadas_ou_proprias(conn, config, numero_tiflux)

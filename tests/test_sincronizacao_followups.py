@@ -77,64 +77,66 @@ class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
 
     def test_resposta_publica_vira_followup_publico_no_glpi(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.glpi.followups_criados[0]["is_private"], 0)
 
     def test_comunicacao_interna_vira_followup_privado_no_glpi(self):
         self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.glpi.followups_criados[0]["is_private"], 1)
 
     def test_mesa_arrecadacao_atribui_followup_ao_leo_no_glpi(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        self.tiflux.mesa_do_ticket = 37964  # ARRECADAÇÃO
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        ticket_tiflux = {"desk": {"id": 37964}}  # ARRECADAÇÃO
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_leo)
 
     def test_outra_mesa_atribui_followup_a_sania_no_glpi_mesmo_que_o_tecnico_seja_outro(self):
         self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
-        self.tiflux.mesa_do_ticket = 37965  # FINANÇAS
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        ticket_tiflux = {"desk": {"id": 37965}}  # FINANÇAS
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
 
     def test_mesa_atual_prevalece_mesmo_se_ticket_mudou_de_mesa_apos_criado(self):
         # Chamado criado originalmente em ARRECADAÇÃO, mas já foi movido pra
         # outra mesa no Tiflux — a autoria do followup deve seguir a mesa ATUAL.
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        self.tiflux.mesa_do_ticket = 37966  # SUPRIMENTOS agora
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        ticket_tiflux = {"desk": {"id": 37966}}  # SUPRIMENTOS agora
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
 
     def test_mesa_desconhecida_cai_no_padrao_sania(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        self.tiflux.mesa_do_ticket = None
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", None)
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
 
     def test_resposta_de_origem_api_e_ignorada_eco(self):
         self.tiflux.respostas = [{"id": 1, "name": "eco", "answer_origin": "api"}]
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
         self.assertEqual((sucesso, erro), (0, 0))
         self.assertEqual(self.glpi.followups_criados, [])
 
     def test_falha_ao_criar_followup_no_glpi_conta_como_erro(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
         self.glpi.erro_ao_criar_followup = "Falha ao criar followup no GLPI (500): boom"
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
         self.assertEqual((sucesso, erro), (0, 1))
 
 
 class TestSincronizarFollowups(unittest.TestCase):
-    def test_chamado_fechado_e_pulado_e_marcado(self):
+    def test_chamado_fechado_manualmente_no_glpi_e_pulado_e_marcado(self):
+        # status 6 (Fechado) não é o status que a cascata usa (5, Solucionado)
+        # — não é reaberto automaticamente, só marcado como fora do escopo.
         glpi = FakeGlpiClient()
         tiflux = FakeTifluxClient()
-        glpi.tickets[1] = {"status": 5}  # fechado
+        glpi.tickets[1] = {"status": 6}
         conn = FakeConnection(respostas=[[(1, "T-1")]])
         sincronizar_followups(conn, _CONFIG, glpi, tiflux)
         sql, params = conn.execucoes[-1]
         self.assertIn("verificacao_status", params)
+        self.assertEqual(glpi.chamados_encerrados, [])
 
     def test_chamado_sem_numero_tiflux_e_ignorado(self):
         glpi = FakeGlpiClient()
@@ -152,6 +154,90 @@ class TestSincronizarFollowups(unittest.TestCase):
             sincronizar_followups(conn, _CONFIG, glpi, tiflux)
         # única execução é a própria SELECT de candidatos — nada mais rodou
         self.assertEqual(len(conn.execucoes), 1)
+
+
+class TestEncerramentoEmCascata(unittest.TestCase):
+    def setUp(self):
+        self.glpi = FakeGlpiClient()
+        self.tiflux = FakeTifluxClient()
+        self.glpi.tickets[1] = {"status": 1}  # aberto no GLPI
+
+    def test_ticket_fechado_no_tiflux_encerra_no_glpi_como_solucionado(self):
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [(1, 5)])
+
+    def test_ticket_aberto_no_tiflux_nao_encerra_no_glpi(self):
+        self.tiflux.ticket_tiflux = {"is_closed": False, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [])
+
+    def test_ticket_cancelado_no_tiflux_tambem_encerra_no_glpi(self):
+        # Tiflux não distingue close/cancel em is_closed — ambos disparam o encerramento
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37965}}
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [(1, 5)])
+
+    def test_falha_ao_encerrar_e_registrada_como_erro_mas_nao_quebra_a_execucao(self):
+        self.glpi.resultado_encerrar_chamado = (False, "Falha ao encerrar chamado #1 no GLPI (500): boom")
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        sql, params = conn.execucoes[-1]
+        self.assertIn("erro", params)
+        self.assertIn("encerramento", params)
+
+    def test_followups_pendentes_sao_sincronizados_antes_do_encerramento(self):
+        # Ordem exigida pelo usuário: sincroniza o que falta e só depois encerra.
+        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(len(self.glpi.followups_criados), 1)
+        self.assertEqual(self.glpi.chamados_encerrados, [(1, 5)])
+
+
+class TestReaberturaEmCascata(unittest.TestCase):
+    def setUp(self):
+        self.glpi = FakeGlpiClient()
+        self.tiflux = FakeTifluxClient()
+        self.glpi.tickets[1] = {"status": 5}  # Solucionado — presumivelmente por cascata anterior
+
+    def test_reaberto_no_tiflux_reabre_no_glpi_como_processando(self):
+        self.tiflux.ticket_tiflux = {"is_closed": False, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")]])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [(1, 2)])
+        sql, params = conn.execucoes[-1]
+        self.assertIn("reabertura", params)
+        self.assertIn("sucesso", params)
+
+    def test_continua_fechado_no_tiflux_nao_reabre_no_glpi(self):
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")]])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [])
+        sql, params = conn.execucoes[-1]
+        self.assertIn("verificacao_status", params)
+
+    def test_falha_ao_consultar_tiflux_nao_reabre_no_glpi(self):
+        self.tiflux.ticket_tiflux = None  # falha ao consultar o ticket no Tiflux
+        conn = FakeConnection(respostas=[[(1, "T-1")]])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [])
+
+    def test_status_glpi_fechado_manualmente_nunca_e_reaberto(self):
+        # status 6 (Fechado) não é o status que a cascata usa — mesmo com o
+        # ticket aberto de novo no Tiflux, não mexe (foi encerrado por um
+        # técnico direto no GLPI, fora do escopo desta integração).
+        self.glpi.tickets[1] = {"status": 6}
+        self.tiflux.ticket_tiflux = {"is_closed": False, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")]])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [])
 
 
 if __name__ == "__main__":

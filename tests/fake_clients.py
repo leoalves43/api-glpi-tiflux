@@ -14,6 +14,8 @@ class FakeGlpiClient:
         self.followups_criados: list[dict] = []
         self.proximo_id_followup = 1000
         self.erro_ao_criar_followup: str | None = None
+        self.chamados_encerrados: list[tuple[int, int]] = []
+        self.resultado_encerrar_chamado: tuple[bool, str | None] = (True, None)
 
     def chamado_tem_grupo_observador(self, id_chamado, id_grupo_observador):
         return self.grupo_observador.get(id_chamado, (True, None))
@@ -42,6 +44,10 @@ class FakeGlpiClient:
         })
         return self.proximo_id_followup, None
 
+    def encerrar_chamado(self, id_chamado, status):
+        self.chamados_encerrados.append((id_chamado, status))
+        return self.resultado_encerrar_chamado
+
 
 class FakeTifluxClient:
     def __init__(self):
@@ -49,7 +55,7 @@ class FakeTifluxClient:
         self.mesas_validas: set[int] | None = None
         self.id_solicitante = (3758056, "Ju STII (Padrão)")
         self.resultado_criar_ticket: tuple[str | None, str | None] = ("T-1", None)
-        self.mesa_do_ticket: int | None = None
+        self.ticket_tiflux: dict | None = {}
         self.resultado_atribuir_tecnico: tuple[bool, int, str] = (True, 200, "")
         self.resultado_anexos = (0, 0, [])
         self.tickets_criados: list[dict] = []
@@ -61,8 +67,8 @@ class FakeTifluxClient:
     def validar_mesa_do_cliente(self, id_mesa):
         return True if self.mesas_validas is None else id_mesa in self.mesas_validas
 
-    def obter_mesa_do_ticket(self, ticket_number):
-        return self.mesa_do_ticket
+    def obter_ticket(self, ticket_number):
+        return self.ticket_tiflux, (200 if self.ticket_tiflux is not None else 404)
 
     def obter_id_solicitante(self, nome_glpi, email_glpi):
         return self.id_solicitante
