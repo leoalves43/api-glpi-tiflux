@@ -79,6 +79,12 @@ class Config:
     # Máximo de anexo aceito pelo Tiflux
     tamanho_maximo_anexo_mb: int = 25
 
+    # Campo personalizado obrigatório "Módulo utilizado" no Tiflux — sempre
+    # criado com a opção "Padrão", já que essa integração não tem como saber
+    # o módulo real a partir do GLPI.
+    id_campo_modulo_utilizado_tiflux: int = 35107
+    id_opcao_modulo_utilizado_padrao_tiflux: int = 819846
+
     # Máximo de IDs "furados" (404) seguidos antes de considerar que chegamos no
     # fim dos chamados criados até agora e parar de sondar nessa execução.
     max_furos_seguidos: int = 50

@@ -193,6 +193,12 @@ def _montar_form_data(
         "desk_id": str(mesa_tiflux),
         "requestor_id": str(id_solicitante_tiflux),
         "priority_id": str(id_prioridade_tiflux),
+        # Campo personalizado obrigatório "Módulo utilizado" -> sempre "Padrão".
+        # "entities[][...]" (sem índice) é o formato que o Rack/Rails do Tiflux espera
+        # pra montar um array de 1 hash; "entities[0][...]" gera um Hash {"0": {...}}
+        # e a API rejeita com "did not contain a required property of 'entity_field_id'".
+        "entities[][entity_field_id]": str(config.id_campo_modulo_utilizado_tiflux),
+        "entities[][value]": str(config.id_opcao_modulo_utilizado_padrao_tiflux),
     }
 
 

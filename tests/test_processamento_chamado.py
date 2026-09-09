@@ -83,6 +83,13 @@ class TestProcessarChamado(unittest.TestCase):
         processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
         self.assertEqual(self.glpi.titulos_atualizados, [(1, "#T-1 - Problema X")])
 
+    def test_sucesso_preenche_modulo_utilizado_com_padrao(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        form_data = self.tiflux.tickets_criados[0]
+        self.assertEqual(form_data["entities[][entity_field_id]"], str(_CONFIG.id_campo_modulo_utilizado_tiflux))
+        self.assertEqual(form_data["entities[][value]"], str(_CONFIG.id_opcao_modulo_utilizado_padrao_tiflux))
+
     def test_sucesso_atribui_tecnico_leo_no_glpi_para_mesa_arrecadacao(self):
         self.glpi.tickets[1] = _TICKET_ARRECADACAO
         processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
