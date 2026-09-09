@@ -24,6 +24,8 @@ class FakeGlpiClient:
         self.solucoes_registradas: list[tuple[int, str]] = []
         self.resultado_registrar_solucao: tuple[bool, str | None] = (True, None)
         self.ja_tem_solucao: dict[int, bool] = {}
+        self.status_restaurados_para_novo: list[int] = []
+        self.resultado_voltar_status_para_novo: tuple[bool, str | None] = (True, None)
 
     def chamado_tem_grupo_observador(self, id_chamado, ids_grupo_observador):
         return self.grupo_observador.get(id_chamado, (True, None))
@@ -73,6 +75,10 @@ class FakeGlpiClient:
 
     def solucao_registrada(self, id_chamado):
         return self.ja_tem_solucao.get(id_chamado, False)
+
+    def voltar_status_para_novo(self, id_chamado):
+        self.status_restaurados_para_novo.append(id_chamado)
+        return self.resultado_voltar_status_para_novo
 
 
 class FakeTifluxClient:

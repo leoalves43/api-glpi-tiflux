@@ -150,6 +150,18 @@ class GlpiClient:
         """
         return self._atualizar_chamado(id_chamado, {"status": status}, "encerrar")
 
+    def voltar_status_para_novo(self, id_chamado: int) -> tuple[bool, str | None]:
+        """
+        PUT /Ticket/{id} forçando status=1 (Novo). Esta instalação do GLPI
+        muda o status pra "Processando (atribuído)" automaticamente sempre
+        que um Ticket_User é criado (atribuir_tecnico) ou um followup é
+        adicionado (criar_followup) — comportamento padrão do GLPI ao
+        registrar um ator/interação, não uma escolha desta integração. Chame
+        depois de qualquer uma dessas duas operações pra manter o chamado em
+        Novo até um técnico humano decidir mudar. Retorna (sucesso, erro_ou_None).
+        """
+        return self._atualizar_chamado(id_chamado, {"status": 1}, "voltar status para Novo do")
+
     def atualizar_titulo(self, id_chamado: int, titulo: str) -> tuple[bool, str | None]:
         """
         PUT /Ticket/{id} pra trocar o título do chamado (ex.: prefixar com o

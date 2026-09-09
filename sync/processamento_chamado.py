@@ -67,13 +67,14 @@ def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamad
         _atribuir_tecnico(tiflux, ticket_number_tiflux, id_tecnico_tiflux, nome_tecnico_tiflux)
     aviso_titulo = _atualizar_titulo_glpi(glpi, id_chamado, ticket.get("name"), ticket_number_tiflux)
     aviso_tecnico_glpi = _atribuir_tecnico_glpi(glpi, id_chamado, mesa_tiflux, config, ticket_number_tiflux)
+    aviso_status_glpi = _restaurar_status_novo_glpi(glpi, id_chamado, ticket_number_tiflux)
     resumo_anexos = _sincronizar_anexos(glpi, tiflux, config, id_chamado, ticket_number_tiflux)
 
     texto_tecnico = f"Técnico {nome_tecnico_tiflux}" if nome_tecnico_tiflux else "Sem técnico atribuído"
     msg = (f"Ticket #{ticket_number_tiflux} criado no Tiflux | Mesa {mesa_tiflux} | "
            f"Prioridade ID {id_prioridade_tiflux} | "
            f"{texto_tecnico} | Solicitante {info_solicitante_tiflux}"
-           f"{resumo_anexos}{aviso_titulo}{aviso_tecnico_glpi}")
+           f"{resumo_anexos}{aviso_titulo}{aviso_tecnico_glpi}{aviso_status_glpi}")
     return "sucesso", ticket_number_tiflux, msg
 
 
@@ -169,6 +170,19 @@ def _atribuir_tecnico_glpi(glpi: GlpiClient, id_chamado: int, mesa_tiflux: int, 
         return ""
     log(f"⚠️ Ticket #{ticket_number_tiflux} criado, mas falhou ao atribuir técnico no GLPI: {erro}")
     return " | Aviso: falha ao atribuir técnico no GLPI"
+
+
+def _restaurar_status_novo_glpi(glpi: GlpiClient, id_chamado: int, ticket_number_tiflux: str) -> str:
+    """
+    Atribuir o técnico (acima) faz o GLPI mudar o status pra "Processando
+    (atribuído)" automaticamente. Volta pra Novo, mesmo motivo do título e do
+    técnico: falha aqui não derruba a sincronização.
+    """
+    sucesso, erro = glpi.voltar_status_para_novo(id_chamado)
+    if sucesso:
+        return ""
+    log(f"⚠️ Ticket #{ticket_number_tiflux} criado, mas falhou ao voltar status para Novo no GLPI: {erro}")
+    return " | Aviso: falha ao voltar status para Novo no GLPI"
 
 
 def _montar_form_data(

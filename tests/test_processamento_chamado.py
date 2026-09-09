@@ -90,6 +90,23 @@ class TestProcessarChamado(unittest.TestCase):
         self.assertEqual(form_data["entities[][entity_field_id]"], str(_CONFIG.id_campo_modulo_utilizado_tiflux))
         self.assertEqual(form_data["entities[][value]"], str(_CONFIG.id_opcao_modulo_utilizado_padrao_tiflux))
 
+    def test_sucesso_volta_status_para_novo_no_glpi_apos_atribuir_tecnico(self):
+        """
+        Atribuir técnico (Ticket_User) faz o GLPI mudar o status pra
+        "Processando (atribuído)" automaticamente; a integração deve
+        restaurar pra Novo depois.
+        """
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual(self.glpi.status_restaurados_para_novo, [1])
+
+    def test_falha_ao_voltar_status_para_novo_nao_derruba_sincronizacao(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        self.glpi.resultado_voltar_status_para_novo = (False, "boom")
+        status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual((status, numero), ("sucesso", "T-1"))
+        self.assertIn("falha ao voltar status para Novo", msg)
+
     def test_sucesso_atribui_tecnico_leo_no_glpi_para_mesa_arrecadacao(self):
         self.glpi.tickets[1] = _TICKET_ARRECADACAO
         processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
