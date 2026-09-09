@@ -211,6 +211,8 @@ def _followups_glpi_pendentes(conn, config: Config, glpi: GlpiClient, id_chamado
     Tiflux como se fosse uma resposta nova, duplicando a mensagem original.
     Um followup escrito de verdade por Léo ou Sania direto no GLPI (não via
     esta integração) também é filtrado — mesma authoria, sem como distinguir.
+    Followups privados não são sincronizados: só comunicação pública cruza
+    pro Tiflux.
     """
     followups = glpi.obter_followups(id_chamado)
     if not followups:
@@ -219,7 +221,9 @@ def _followups_glpi_pendentes(conn, config: Config, glpi: GlpiClient, id_chamado
     ids_proprios = {config.id_glpi_leo, config.id_glpi_sania}
     return [
         f for f in followups
-        if f.get("id") not in ja_processados and f.get("users_id") not in ids_proprios
+        if f.get("id") not in ja_processados
+        and f.get("users_id") not in ids_proprios
+        and not f.get("is_private")
     ]
 
 
@@ -243,11 +247,8 @@ def _publicar_followup_no_tiflux(
 
 
 def _enviar_followup_para_tiflux(tiflux: TifluxClient, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket):
-    is_private = bool(followup.get("is_private"))
     id_autor = followup.get("users_id")
 
-    if is_private:
-        return "interna", tiflux.publicar_comunicacao_interna(numero_tiflux, conteudo)
     if autor_e_solicitante(id_autor, id_requerente_ticket):
         return "publica", tiflux.publicar_resposta_cliente(numero_tiflux, conteudo, nome_requerente)
     return "publica", tiflux.publicar_resposta_agente(numero_tiflux, conteudo)
@@ -283,10 +284,11 @@ def sincronizar_followups_tiflux_para_glpi(
     ticket_tiflux: dict | None,
 ) -> tuple[int, int]:
     """
-    Busca respostas públicas (/answers) e comunicações internas
-    (/internal_communications) do ticket no Tiflux, filtra as que ainda não
-    foram sincronizadas ou que a própria integração criou (eco), e cria um
-    followup correspondente no GLPI pra cada uma.
+    Busca respostas públicas (/answers) do ticket no Tiflux, filtra as que
+    ainda não foram sincronizadas ou que a própria integração criou (eco), e
+    cria um followup correspondente no GLPI pra cada uma. Comunicações
+    internas (/internal_communications) não são sincronizadas: só comunicação
+    pública cruza pro GLPI.
 
     A autoria do followup no GLPI é definida pela MESA ATUAL do chamado no
     Tiflux (campo `desk` de ticket_tiflux), não pelo técnico atribuído lá (ver
@@ -297,10 +299,8 @@ def sincronizar_followups_tiflux_para_glpi(
     followups sempre seguem a mesa de agora. Pode vir None se essa consulta
     falhou; nesse caso cai no autor padrão (Sania, ver definir_autor_glpi).
 
-    Defesa contra eco: a tabela de auditoria (id já processado ou já criado por
-    nós) é o mecanismo primário, único disponível pra /internal_communications.
-    Pra /answers, o campo answer_origin/author (só existe nesse endpoint) serve
-    de defesa adicional.
+    Defesa contra eco: a tabela de auditoria (id já processado) mais o campo
+    answer_origin/author.
     Retorna (qtd_sucesso, qtd_erro).
     """
     id_mesa = ((ticket_tiflux or {}).get("desk") or {}).get("id")
@@ -308,11 +308,8 @@ def sincronizar_followups_tiflux_para_glpi(
 
     ja_processados_ou_proprios = db_followups.obter_respostas_tiflux_ja_processadas_ou_proprias(conn, config, numero_tiflux)
     respostas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
-    comunicacoes = tiflux.listar_comunicacoes_internas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
 
-    s1, e1 = _publicar_respostas_publicas(conn, config, glpi, id_chamado, numero_tiflux, respostas, ja_processados_ou_proprios, id_autor_glpi)
-    s2, e2 = _publicar_comunicacoes_internas(conn, config, glpi, id_chamado, numero_tiflux, comunicacoes, ja_processados_ou_proprios, id_autor_glpi)
-    return s1 + s2, e1 + e2
+    return _publicar_respostas_publicas(conn, config, glpi, id_chamado, numero_tiflux, respostas, ja_processados_ou_proprios, id_autor_glpi)
 
 
 def _publicar_respostas_publicas(conn, config, glpi: GlpiClient, id_chamado, numero_tiflux, respostas, ja_processados_ou_proprios, id_autor_glpi: int) -> tuple[int, int]:
@@ -327,24 +324,6 @@ def _publicar_respostas_publicas(conn, config, glpi: GlpiClient, id_chamado, num
         sucesso = _registrar_followup_tiflux_para_glpi(
             conn, config, id_chamado, numero_tiflux, "publica", id_origem, id_criado, erro,
             mensagem_sucesso=f"Resposta Tiflux #{id_origem} publicada como followup no GLPI (id {id_criado})",
-        )
-        qtd_sucesso, qtd_erro = _acumular(sucesso, qtd_sucesso, qtd_erro)
-    return qtd_sucesso, qtd_erro
-
-
-def _publicar_comunicacoes_internas(conn, config, glpi: GlpiClient, id_chamado, numero_tiflux, comunicacoes, ja_processados_ou_proprios, id_autor_glpi: int) -> tuple[int, int]:
-    qtd_sucesso = qtd_erro = 0
-    for comunicacao in comunicacoes:
-        id_origem = comunicacao.get("id")
-        if id_origem in ja_processados_ou_proprios:
-            continue
-        conteudo = html.unescape(comunicacao.get("text") or "")
-        nome_autor = (comunicacao.get("user") or {}).get("name")
-        conteudo = _prefixar_autor_tiflux(nome_autor, comunicacao.get("created_at"), conteudo)
-        id_criado, erro = glpi.criar_followup(id_chamado, conteudo, is_private=1, users_id=id_autor_glpi)
-        sucesso = _registrar_followup_tiflux_para_glpi(
-            conn, config, id_chamado, numero_tiflux, "interna", id_origem, id_criado, erro,
-            mensagem_sucesso=f"Comunicação interna Tiflux #{id_origem} publicada como followup privado no GLPI (id {id_criado})",
         )
         qtd_sucesso, qtd_erro = _acumular(sucesso, qtd_sucesso, qtd_erro)
     return qtd_sucesso, qtd_erro

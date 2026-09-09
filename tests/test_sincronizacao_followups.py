@@ -58,12 +58,12 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 0))
 
-    def test_followup_privado_vai_para_comunicacao_interna(self):
+    def test_followup_privado_nao_e_sincronizado(self):
         self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 1, "users_id": 5}]
         self.glpi.tickets[1] = {}
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
-        self.assertEqual((sucesso, erro), (1, 0))
-        self.assertEqual(self.tiflux.publicacoes[0][0], "interna")
+        self.assertEqual((sucesso, erro), (0, 0))
+        self.assertEqual(self.tiflux.publicacoes, [])
 
     def test_followup_publico_do_requerente_vai_para_client_answer(self):
         self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]
@@ -82,8 +82,9 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
         self.assertEqual(self.tiflux.publicacoes[0][0], "agente")
 
     def test_falha_http_ao_publicar_conta_como_erro(self):
-        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 1, "users_id": 5}]
+        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]
         self.glpi.tickets[1] = {}
+        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 5)
         self.tiflux.resposta_publicacao = _FakeHttpResponse(500, None)
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 1))
@@ -98,7 +99,7 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
         self.assertEqual(self.tiflux.publicacoes, [])
 
     def test_followup_criado_pela_integracao_em_nome_de_sania_nao_e_reenviado_ao_tiflux(self):
-        self.glpi.followups[1] = [{"id": 11, "content": "oi", "is_private": 1, "users_id": _CONFIG.id_glpi_sania}]
+        self.glpi.followups[1] = [{"id": 11, "content": "oi", "is_private": 0, "users_id": _CONFIG.id_glpi_sania}]
         self.glpi.tickets[1] = {}
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 0))
@@ -117,7 +118,7 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
 
     def test_ja_processado_e_ignorado(self):
         self.conn = FakeConnection(respostas=[[(10,)]])
-        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 1, "users_id": 5}]
+        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 0))
         self.assertEqual(self.tiflux.publicacoes, [])
@@ -143,17 +144,11 @@ class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
         # autoria real no GLPI (users_id) continua seguindo a mesa, não o autor exibido no texto
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
 
-    def test_comunicacao_interna_vira_followup_privado_no_glpi(self):
+    def test_comunicacao_interna_no_tiflux_nao_e_sincronizada(self):
         self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
         sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
-        self.assertEqual((sucesso, erro), (1, 0))
-        self.assertEqual(self.glpi.followups_criados[0]["is_private"], 1)
-
-    def test_comunicacao_interna_e_prefixada_com_autor_e_data_em_negrito(self):
-        self.tiflux.comunicacoes = [{"id": 2, "text": "com", "user": {"name": "Sania Almeida"}, "created_at": "2026-09-09T14:10:26Z"}]
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
-        conteudo = self.glpi.followups_criados[0]["conteudo"]
-        self.assertEqual(conteudo, "<strong>Sania Almeida</strong> (09/09/2026 11:10)<br><br>com")
+        self.assertEqual((sucesso, erro), (0, 0))
+        self.assertEqual(self.glpi.followups_criados, [])
 
     def test_sem_autor_ou_data_usa_desconhecido_e_omite_parenteses(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
@@ -168,7 +163,7 @@ class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_leo)
 
     def test_outra_mesa_atribui_followup_a_sania_no_glpi_mesmo_que_o_tecnico_seja_outro(self):
-        self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
+        self.tiflux.respostas = [{"id": 2, "name": "resp"}]
         ticket_tiflux = {"desk": {"id": 37965}}  # FINANÇAS
         sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
