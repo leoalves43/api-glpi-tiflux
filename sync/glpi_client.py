@@ -132,10 +132,22 @@ class GlpiClient:
         cascata quando o ticket correspondente foi fechado no Tiflux).
         Retorna (sucesso, erro_ou_None).
         """
-        payload = {"input": {"status": status}}
+        return self._atualizar_chamado(id_chamado, {"status": status}, "encerrar")
+
+    def atualizar_titulo(self, id_chamado: int, titulo: str) -> tuple[bool, str | None]:
+        """
+        PUT /Ticket/{id} pra trocar o título do chamado (ex.: prefixar com o
+        número do ticket no Tiflux depois de criado, pra facilitar achar um
+        chamado no GLPI a partir do número que aparece no Tiflux).
+        Retorna (sucesso, erro_ou_None).
+        """
+        return self._atualizar_chamado(id_chamado, {"name": titulo}, "atualizar título do")
+
+    def _atualizar_chamado(self, id_chamado: int, campos: dict, acao: str) -> tuple[bool, str | None]:
+        payload = {"input": campos}
         resp = requests.put(f"{self._url_base}/Ticket/{id_chamado}", json=payload, headers=self._headers)
         if resp.status_code not in (200, 201):
-            return False, f"Falha ao encerrar chamado #{id_chamado} no GLPI ({resp.status_code}): {resp.text}"
+            return False, f"Falha ao {acao} chamado #{id_chamado} no GLPI ({resp.status_code}): {resp.text}"
         return True, None
 
     def obter_requerente(self, id_chamado: int, ticket: dict) -> tuple[str, str | None, int | None]:

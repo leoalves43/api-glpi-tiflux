@@ -16,6 +16,8 @@ class FakeGlpiClient:
         self.erro_ao_criar_followup: str | None = None
         self.chamados_encerrados: list[tuple[int, int]] = []
         self.resultado_encerrar_chamado: tuple[bool, str | None] = (True, None)
+        self.titulos_atualizados: list[tuple[int, str]] = []
+        self.resultado_atualizar_titulo: tuple[bool, str | None] = (True, None)
 
     def chamado_tem_grupo_observador(self, id_chamado, id_grupo_observador):
         return self.grupo_observador.get(id_chamado, (True, None))
@@ -47,6 +49,10 @@ class FakeGlpiClient:
     def encerrar_chamado(self, id_chamado, status):
         self.chamados_encerrados.append((id_chamado, status))
         return self.resultado_encerrar_chamado
+
+    def atualizar_titulo(self, id_chamado, titulo):
+        self.titulos_atualizados.append((id_chamado, titulo))
+        return self.resultado_atualizar_titulo
 
 
 class FakeTifluxClient:

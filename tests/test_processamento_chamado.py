@@ -78,6 +78,20 @@ class TestProcessarChamado(unittest.TestCase):
         self.assertIn("Léo Alves", msg)  # mesa ARRECADAÇÃO -> tecnico Leo
         self.assertNotIn("Anexos", msg)
 
+    def test_sucesso_prefixa_titulo_no_glpi_com_numero_do_tiflux(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual(self.glpi.titulos_atualizados, [(1, "#T-1 - Problema X")])
+
+    def test_falha_ao_atualizar_titulo_nao_derruba_sincronizacao(self):
+        # Ao contrário de atribuir_tecnico: já criou o ticket no Tiflux, marcar
+        # como erro duplicaria no reprocessamento — só avisa e segue (like anexos).
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        self.glpi.resultado_atualizar_titulo = (False, "Falha ao atualizar título do chamado #1 no GLPI (500): boom")
+        status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual((status, numero), ("sucesso", "T-1"))
+        self.assertIn("Aviso: falha ao prefixar título", msg)
+
     def test_sucesso_mesa_diferente_de_arrecadacao_fica_sem_tecnico(self):
         self.glpi.tickets[1] = _TICKET_FINANCAS
         status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)

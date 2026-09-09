@@ -130,6 +130,25 @@ class TestEncerrarChamado(unittest.TestCase):
         self.assertIn("400", erro)
 
 
+class TestAtualizarTitulo(unittest.TestCase):
+    def test_sucesso_retorna_true(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/Ticket/1", FakeResponse(200, {}))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).atualizar_titulo(1, "#361458 - Solicito acesso")
+        self.assertEqual((sucesso, erro), (True, None))
+        _, _, kwargs = fake.chamadas[-1]
+        self.assertEqual(kwargs["json"]["input"]["name"], "#361458 - Solicito acesso")
+
+    def test_falha_http_retorna_erro(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/Ticket/1", FakeResponse(400, text="bad request"))
+        with patch("sync.glpi_client.requests", fake):
+            sucesso, erro = _client(fake).atualizar_titulo(1, "novo titulo")
+        self.assertFalse(sucesso)
+        self.assertIn("400", erro)
+
+
 class TestChamadoTemGrupoObservador(unittest.TestCase):
     def test_encontrado_como_observador(self):
         fake = FakeRequests()

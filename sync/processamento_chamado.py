@@ -2,7 +2,7 @@
 
 import requests
 
-from sync.config import Config
+from sync.config import Config, log
 from sync.glpi_client import GlpiClient
 from sync.html_texto import html_para_texto_plano
 from sync.regras_negocio import (
@@ -64,13 +64,14 @@ def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamad
     ticket_number_tiflux = _criar_ticket(tiflux, form_data)
     if id_tecnico_tiflux is not None:
         _atribuir_tecnico(tiflux, ticket_number_tiflux, id_tecnico_tiflux, nome_tecnico_tiflux)
+    aviso_titulo = _atualizar_titulo_glpi(glpi, id_chamado, ticket.get("name"), ticket_number_tiflux)
     resumo_anexos = _sincronizar_anexos(glpi, tiflux, config, id_chamado, ticket_number_tiflux)
 
     texto_tecnico = f"Técnico {nome_tecnico_tiflux}" if nome_tecnico_tiflux else "Sem técnico atribuído"
     msg = (f"Ticket #{ticket_number_tiflux} criado no Tiflux | Mesa {mesa_tiflux} | "
            f"Prioridade ID {id_prioridade_tiflux} | "
            f"{texto_tecnico} | Solicitante {info_solicitante_tiflux}"
-           f"{resumo_anexos}")
+           f"{resumo_anexos}{aviso_titulo}")
     return "sucesso", ticket_number_tiflux, msg
 
 
@@ -131,6 +132,24 @@ def _atribuir_tecnico(tiflux: TifluxClient, ticket_number_tiflux: str, id_tecnic
         msg = (f"Ticket #{ticket_number_tiflux} criado, mas falhou ao atribuir técnico "
                f"{nome_tecnico_tiflux} ({status_code}): {texto_resposta}")
         raise _ChamadoNaoSincronizavel("erro", msg, numero_tiflux=ticket_number_tiflux)
+
+
+def _atualizar_titulo_glpi(glpi: GlpiClient, id_chamado: int, titulo_original: str, ticket_number_tiflux: str) -> str:
+    """
+    Prefixa o título do chamado no GLPI com o número do ticket no Tiflux, pra
+    facilitar achar um a partir do outro. Falha aqui não derruba a
+    sincronização (mesmo padrão dos anexos, não o de atribuir_tecnico): o
+    ticket já foi criado no Tiflux, e marcar como erro reprocessaria do zero
+    na próxima execução — criando um ticket DUPLICADO no Tiflux (bug conhecido,
+    ver db_followups.obter_chamados_para_varrer_followups). Só loga e segue.
+    Retorna um resumo (string vazia se deu certo) pra anexar na mensagem final.
+    """
+    novo_titulo = f"#{ticket_number_tiflux} - {titulo_original}"
+    sucesso, erro = glpi.atualizar_titulo(id_chamado, novo_titulo)
+    if sucesso:
+        return ""
+    log(f"⚠️ Ticket #{ticket_number_tiflux} criado, mas falhou ao prefixar o título no GLPI: {erro}")
+    return " | Aviso: falha ao prefixar título no GLPI"
 
 
 def _montar_form_data(
