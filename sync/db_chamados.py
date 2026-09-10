@@ -48,22 +48,37 @@ def obter_ids_ja_processados(conn, config: Config) -> set[int]:
 
 def obter_proximo_id_para_sondar(conn, config: Config) -> int:
     """
-    De onde a sondagem deve continuar: JANELA_RELEITURA_SONDAGEM IDs antes do
-    maior id_glpi já registrado na auditoria, nunca abaixo de ID_MINIMO_GLPI.
-    Recuar (em vez de continuar exatamente do maior_id + 1) reconfere um
-    intervalo de IDs recentes que já foram sondados: um chamado pode devolver
-    404 na hora exata em que a sondagem passa por ele (ainda não commitado no
-    GLPI, ou temporariamente na lixeira) e, sem esse recuo, nunca mais seria
-    revisitado. IDs já com resultado 'sucesso' são filtrados depois em
-    obter_ids_ja_processados, então reconferir não os reprocessa.
+    De onde a sondagem deve continuar: o menor id_glpi entre os últimos
+    QUANTIDADE_REGISTROS_PARA_RECUO chamados já confirmados (status 'sucesso'
+    ou 'erro'), nunca abaixo de ID_MINIMO_GLPI. Recuar (em vez de continuar
+    exatamente do maior_id + 1) reconfere um intervalo de IDs recentes que já
+    foram sondados: um chamado pode devolver 404 na hora exata em que a
+    sondagem passa por ele (ainda não commitado no GLPI, ou temporariamente
+    na lixeira) e, sem esse recuo, nunca mais seria revisitado (chamado
+    #33769 ficou órfão assim). Basear o recuo em confirmações reais (em vez
+    de uma quantidade fixa de IDs) faz a janela se esticar sozinha quando há
+    trechos longos de chamados 'ignorado' (fora do grupo observador) no meio
+    — que não contam como confirmação — em vez de um número fixo que pode
+    ficar pequeno demais. IDs já com resultado 'sucesso' são filtrados depois
+    em obter_ids_ja_processados, então reconferir não os reprocessa.
     """
     tabela = config.tabela_auditoria
     with conn.cursor() as cur:
-        cur.execute(f"SELECT MAX(id_glpi) FROM {tabela}")
-        maior_id = cur.fetchone()[0]
-    if maior_id is None:
+        cur.execute(
+            f"""
+            SELECT MIN(id_glpi) FROM (
+                SELECT id_glpi FROM {tabela}
+                WHERE status IN ('sucesso', 'erro')
+                ORDER BY id_glpi DESC
+                LIMIT %s
+            ) ultimos_confirmados
+            """,
+            (config.quantidade_registros_para_recuo,),
+        )
+        menor_id_recente = cur.fetchone()[0]
+    if menor_id_recente is None:
         return config.id_minimo_glpi
-    return max(config.id_minimo_glpi, maior_id + 1 - config.janela_releitura_sondagem)
+    return max(config.id_minimo_glpi, menor_id_recente)
 
 
 def obter_ids_para_retry(conn, config: Config) -> set[int]:
