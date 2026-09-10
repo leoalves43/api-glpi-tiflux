@@ -45,6 +45,20 @@ class TestObterProximoIdParaSondar(unittest.TestCase):
         self.assertEqual(params, (10,))
 
 
+class TestObterEstadoChamado(unittest.TestCase):
+    def test_nenhuma_linha_retorna_none(self):
+        conn = FakeConnection(respostas=[[]])
+        self.assertIsNone(db_chamados.obter_estado_chamado(conn, _CONFIG, 1))
+
+    def test_retorna_status_e_numero_tiflux(self):
+        conn = FakeConnection(respostas=[[("sucesso", 361535)]])
+        self.assertEqual(db_chamados.obter_estado_chamado(conn, _CONFIG, 1), ("sucesso", 361535))
+
+    def test_retorna_numero_tiflux_none_quando_nulo(self):
+        conn = FakeConnection(respostas=[[("erro", None)]])
+        self.assertEqual(db_chamados.obter_estado_chamado(conn, _CONFIG, 1), ("erro", None))
+
+
 class TestObterIdsParaRetry(unittest.TestCase):
     def test_retorna_conjunto_de_ids_com_erro(self):
         conn = FakeConnection(respostas=[[(5,), (9,)]])

@@ -81,6 +81,19 @@ def obter_proximo_id_para_sondar(conn, config: Config) -> int:
     return max(config.id_minimo_glpi, menor_id_recente)
 
 
+def obter_estado_chamado(conn, config: Config, id_glpi: int) -> tuple[str, int | None] | None:
+    """
+    Status e numero_tiflux atuais de um chamado na auditoria, ou None se ele
+    nunca teve um resultado gravado. Usado por forcar_sincronizacao.py pra
+    decidir com segurança se pode (re)criar no Tiflux sem duplicar.
+    """
+    tabela = config.tabela_auditoria
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT status, numero_tiflux FROM {tabela} WHERE id_glpi = %s", (id_glpi,))
+        row = cur.fetchone()
+    return (row[0], row[1]) if row else None
+
+
 def obter_ids_para_retry(conn, config: Config) -> set[int]:
     tabela = config.tabela_auditoria
     with conn.cursor() as cur:

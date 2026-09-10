@@ -43,6 +43,7 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
 | `sync/processamento_chamado.py` | `processar_chamado()` — creates one ticket end to end |
 | `sync/sincronizacao_followups.py` | the two directional sync functions + orchestrator |
 | `sync/main.py` | `main()` — wiring, candidate selection, top-level logging |
+| `sync/forcar_sincronizacao.py` | `python -m sync.forcar_sincronizacao --id-glpi N` — manual backup for one ticket skipped by the cron; see below |
 
 `GlpiClient` and `TifluxClient` are constructed once per run (in `main()`) and
 threaded through as parameters — no module-level globals, no per-call
@@ -70,6 +71,24 @@ Full DDL and column reference: `docs/data/audit_tables.toon`. Summary:
   `_headers_get` (GET only, no Content-Type — see comment in `TifluxClient.__init__`),
   `_headers_json`, `_headers_form` (unused by followup code — followup
   POSTs use `files={"field": (None, value)}` to force real multipart; see LOG.md).
+
+## Manual force-sync entrypoint
+
+`sync/forcar_sincronizacao.py`, driven by a separate PHP interface
+(`interface-web-api-glpi-tiflux`, sibling project) for when a ticket falls
+out of the automatic sondagem/rotation windows. Reuses `processar_chamado`
+and both followup-direction functions directly — no business logic
+duplicated in PHP, which only shells out to this script and parses its
+final stdout line (JSON).
+
+`decidir_acao()` picks the action from the audit row alone, never from
+`status` in isolation — `numero_tiflux IS NOT NULL` always means "don't call
+`processar_chamado`," including on `status='erro'` (the known duplication
+bug above), because that column is the one that tracks whether a Tiflux
+ticket actually exists. A `pg_try_advisory_lock` keyed on `(forcar_sincronizacao,
+id_glpi)` blocks a double-click/two-tab race on the same ticket; it does NOT
+coordinate with the Windows Scheduled Task `GLPI-Tiflux-Sync`, which has no
+lock of its own.
 
 ## Known pre-existing bug (not fixed, tracked)
 
