@@ -87,6 +87,7 @@ class FakeTifluxClient:
         self.mesas_validas: set[int] | None = None
         self.id_solicitante = (3758056, "Ju STII (Padrão)")
         self.resultado_criar_ticket: tuple[str | None, str | None] = ("T-1", None)
+        self.resultado_buscar_ticket_existente: tuple[str | None, str | None] = (None, None)
         self.ticket_tiflux: dict | None = {}
         self.resultado_atribuir_tecnico: tuple[bool, int, str] = (True, 200, "")
         self.resultado_anexos = (0, 0, [])
@@ -104,6 +105,9 @@ class FakeTifluxClient:
 
     def obter_id_solicitante(self, nome_glpi, email_glpi):
         return self.id_solicitante
+
+    def buscar_ticket_por_chamado_glpi(self, id_chamado):
+        return self.resultado_buscar_ticket_existente
 
     def criar_ticket(self, form_data):
         self.tickets_criados.append(form_data)

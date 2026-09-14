@@ -51,6 +51,11 @@ def processar_chamado(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id
 def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamado: int) -> ResultadoChamado:
     _validar_escopo(glpi, config, id_chamado)
     ticket = _buscar_ticket(glpi, id_chamado)
+
+    numero_existente = _buscar_ticket_existente(tiflux, id_chamado)
+    if numero_existente is not None:
+        return _vincular_ticket_existente(glpi, id_chamado, ticket, numero_existente)
+
     mesa_tiflux = _resolver_mesa(ticket, tiflux)
     id_prioridade_tiflux = _resolver_prioridade(mesa_tiflux)
 
@@ -89,6 +94,34 @@ def _buscar_ticket(glpi: GlpiClient, id_chamado: int) -> dict:
     if ticket is None:
         raise _ChamadoNaoSincronizavel("erro", f"Chamado não encontrado no GLPI (status {status_code})")
     return ticket
+
+
+def _buscar_ticket_existente(tiflux: TifluxClient, id_chamado: int) -> str | None:
+    """
+    Antes de criar um ticket novo, confere se já existe um no Tiflux pra esse
+    chamado (aberto manualmente durante uma queda do token GLPI, por exemplo)
+    — evita duplicar. Erro na busca (API fora do ar, múltiplos candidatos
+    ambíguos) interrompe o processamento como 'erro' em vez de arriscar criar
+    um duplicado.
+    """
+    numero_tiflux, erro = tiflux.buscar_ticket_por_chamado_glpi(id_chamado)
+    if erro:
+        raise _ChamadoNaoSincronizavel("erro", erro)
+    return numero_tiflux
+
+
+def _vincular_ticket_existente(glpi: GlpiClient, id_chamado: int, ticket: dict, numero_tiflux: str) -> ResultadoChamado:
+    """
+    Ticket já existe no Tiflux (aberto manualmente) — só registra o vínculo na
+    auditoria, sem recriar. Prefixa o título no GLPI (mesmo passo do caminho
+    normal) pra deixar o vínculo visível e servir de pré-checagem rápida em
+    forcar_sincronizacao._numero_tiflux_no_titulo; não mexe em anexo/técnico/
+    status no Tiflux ou no GLPI, já que o chamado foi tratado por uma pessoa.
+    """
+    aviso_titulo = _atualizar_titulo_glpi(glpi, id_chamado, ticket.get("name"), numero_tiflux)
+    msg = (f"Ticket #{numero_tiflux} já existia no Tiflux (aberto manualmente) — "
+           f"vinculado ao chamado GLPI #{id_chamado} sem criar duplicata{aviso_titulo}")
+    return "sucesso", numero_tiflux, msg
 
 
 def _resolver_mesa(ticket: dict, tiflux: TifluxClient) -> int:

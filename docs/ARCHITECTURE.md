@@ -19,8 +19,12 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
 1. **Ticket creation, GLPI -> Tiflux only.** `GlpiClient.buscar_chamados_desde()`
    (sync/glpi_client.py) probes `GET /Ticket/{id}` sequentially (this GLPI
    install's `/search/Ticket` is unreliable — do not use it).
-   `processar_chamado()` (sync/processamento_chamado.py) translates and creates
-   each ticket in Tiflux, assigns a technician, uploads attachments.
+   `processar_chamado()` (sync/processamento_chamado.py) first checks
+   `TifluxClient.buscar_ticket_por_chamado_glpi()` for an already-existing
+   Tiflux ticket (title `"<titulo> (<id_glpi>)"`, e.g. one opened manually
+   during a GLPI token outage) — if found, links it instead of creating a
+   duplicate. Otherwise translates and creates the ticket in Tiflux, assigns a
+   technician, uploads attachments.
 2. **Followup sync, bidirectional, for already-synced open tickets.**
    `sincronizar_followups()` (sync/sincronizacao_followups.py) rotates through a
    batch of `status='sucesso'` tickets, skips closed ones, and calls:

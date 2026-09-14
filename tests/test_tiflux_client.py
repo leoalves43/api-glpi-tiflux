@@ -126,6 +126,58 @@ class TestCriarTicket(unittest.TestCase):
         self.assertEqual((numero, erro), ("T-1", None))
 
 
+class TestBuscarTicketPorChamadoGlpi(unittest.TestCase):
+    def test_um_candidato_e_encontrado(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, [{"ticket_number": 361837, "title": "Acesso (33870)"}]))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().buscar_ticket_por_chamado_glpi(33870)
+        self.assertEqual((numero, erro), ("361837", None))
+
+    def test_encontra_mesmo_com_filter_by_all_ticket_fechado(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, [{"ticket_number": 1, "title": "X (33870)", "is_closed": True}]))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().buscar_ticket_por_chamado_glpi(33870)
+        self.assertEqual((numero, erro), ("1", None))
+        self.assertEqual(fake.chamadas[0][2]["params"]["filter_by"], "all")
+
+    def test_nenhum_candidato_nao_e_erro(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, []))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().buscar_ticket_por_chamado_glpi(33870)
+        self.assertEqual((numero, erro), (None, None))
+
+    def test_busca_fuzzy_e_filtrada_por_numero_isolado_no_titulo(self):
+        """search da API do Tiflux é fuzzy (bate até no início da descrição) —
+        um título que só contém o id como parte de outro número não conta."""
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, [{"ticket_number": 1, "title": "Chamado 133870x"}]))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().buscar_ticket_por_chamado_glpi(33870)
+        self.assertEqual((numero, erro), (None, None))
+
+    def test_multiplos_candidatos_retorna_erro_sem_escolher(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, [
+            {"ticket_number": 1, "title": "A (33870)"},
+            {"ticket_number": 2, "title": "B (33870)"},
+        ]))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().buscar_ticket_por_chamado_glpi(33870)
+        self.assertIsNone(numero)
+        self.assertIn("1, 2", erro)
+
+    def test_falha_http_retorna_erro(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(500, text="fora do ar"))
+        with patch("sync.tiflux_client.requests", fake):
+            numero, erro = _client().buscar_ticket_por_chamado_glpi(33870)
+        self.assertIsNone(numero)
+        self.assertIn("500", erro)
+
+
 class TestAtribuirTecnico(unittest.TestCase):
     def test_sucesso_no_change_responsible(self):
         fake = FakeRequests()

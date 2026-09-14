@@ -155,6 +155,28 @@ class TestProcessarChamado(unittest.TestCase):
         self.assertEqual(status, "sucesso")
         self.assertIn("Anexos: 1 enviado(s)", msg)
 
+    def test_ticket_existente_no_tiflux_e_vinculado_sem_criar_duplicata(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        self.tiflux.resultado_buscar_ticket_existente = ("361837", None)
+        status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual((status, numero), ("sucesso", "361837"))
+        self.assertIn("já existia no Tiflux", msg)
+        self.assertEqual(self.tiflux.tickets_criados, [])
+
+    def test_ticket_existente_no_tiflux_ainda_prefixa_titulo_no_glpi(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        self.tiflux.resultado_buscar_ticket_existente = ("361837", None)
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual(self.glpi.titulos_atualizados, [(1, "#361837 - Problema X")])
+
+    def test_erro_ao_buscar_ticket_existente_nao_cria_ticket(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        self.tiflux.resultado_buscar_ticket_existente = (None, "2 tickets no Tiflux têm o chamado GLPI #1 no título")
+        status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        self.assertEqual((status, numero), ("erro", None))
+        self.assertIn("2 tickets", msg)
+        self.assertEqual(self.tiflux.tickets_criados, [])
+
     def test_erro_de_rede_vira_status_erro(self):
         self.glpi.tickets[1] = _TICKET_ARRECADACAO
         with patch.object(self.glpi, "obter_requerente", side_effect=requests.ConnectionError("fora do ar")):

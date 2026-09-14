@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import urllib.parse
 
 import requests
@@ -146,6 +147,52 @@ class TifluxClient:
         if resp.status_code != 200:
             return None, resp.status_code
         return resp.json(), resp.status_code
+
+    def buscar_ticket_por_chamado_glpi(self, id_chamado: int) -> tuple[str | None, str | None]:
+        """
+        Procura um ticket já existente no Tiflux pro chamado GLPI `id_chamado`,
+        pelo título "<titulo> (<id_chamado>)" — mesma convenção usada tanto pela
+        criação automática (ver _montar_form_data em processamento_chamado.py)
+        quanto pelas aberturas manuais feitas durante quedas do token GLPI.
+        Evita duplicar o ticket quando o chamado não tem linha na auditoria mas
+        já foi aberto manualmente no Tiflux.
+        Retorna (ticket_number, erro): ticket_number vem preenchido só quando
+        exatamente um ticket bate; erro descreve por que nada foi retornado
+        (nenhum achado é normal e não conta como erro: (None, None)), incluindo
+        o caso de múltiplos candidatos — nunca escolhe um automaticamente.
+        """
+        resp = requests.get(
+            f"{self._url_base}/tickets",
+            params={"search": str(id_chamado), "filter_by": "all", "client_ids": str(self._cliente_id), "limit": 200},
+            headers=self._headers_get,
+        )
+        if resp.status_code != 200:
+            return None, f"Falha ao buscar ticket existente pro chamado GLPI #{id_chamado} ({resp.status_code}): {resp.text}"
+
+        candidatos = self._filtrar_tickets_pelo_id_glpi(resp.json(), id_chamado)
+        if not candidatos:
+            return None, None
+        if len(candidatos) > 1:
+            numeros = ", ".join(str(n) for n in candidatos)
+            return None, (
+                f"{len(candidatos)} tickets no Tiflux têm o chamado GLPI #{id_chamado} no título "
+                f"({numeros}) — não dá pra escolher automaticamente, reconcilie manualmente"
+            )
+        return str(candidatos[0]), None
+
+    @staticmethod
+    def _filtrar_tickets_pelo_id_glpi(tickets, id_chamado: int) -> list:
+        """
+        O parâmetro `search` da API do Tiflux é fuzzy (bate em título, cliente,
+        mesa, número do ticket, responsável e início da descrição — ver
+        openapi-spec-tiflux.json), então filtra de novo aqui pelo id do GLPI
+        aparecendo como número isolado no título (não como parte de outro
+        número maior).
+        """
+        if not isinstance(tickets, list):
+            return []
+        padrao = re.compile(rf"(?<!\d){id_chamado}(?!\d)")
+        return [t.get("ticket_number") for t in tickets if padrao.search(t.get("title") or "")]
 
     def atribuir_tecnico(self, ticket_number: str, id_tecnico: int) -> tuple[bool, int, str]:
         """Retorna (sucesso, status_http_da_ultima_tentativa, corpo_da_resposta)."""

@@ -1,16 +1,23 @@
 # Handoff
 
-DONE: added `sync/forcar_sincronizacao.py` (manual backup entrypoint,
-`python -m sync.forcar_sincronizacao --id-glpi N`) + `db_chamados.obter_estado_chamado()`,
-for a new sibling PHP project `interface-web-api-glpi-tiflux` (search page +
-force-sync page) to shell out to. Never re-creates a Tiflux ticket when
-`numero_tiflux` is already set (any status) — only forces followups in that
-case. Advisory-lock guarded against double-click/two-tab races. 187 tests
-green (3 new files/additions, see decisions/LOG.md 2026-09-10 entry).
+DONE: `processar_chamado()` now checks for an already-existing Tiflux ticket
+(by title, `TifluxClient.buscar_ticket_por_chamado_glpi()`) before creating
+one, to stop duplicating chamados that were opened manually during the
+2026-09-11 GLPI token outage. See decisions/LOG.md 2026-09-14 entry. 197
+tests green (2 new files/additions: tiflux_client + processamento_chamado
+tests). Also reconciled `api_glpi_tiflux.numero_tiflux` in Postgres for the
+8 GLPI ids duplicated by this bug (33870/33885/33896/33898/33913/33921/
+33922/33923) back to the original manual Tiflux ticket, per user's request
+(2026-09-14, "sim corrigir a tabela agora").
 
-NEXT: Commit and push (this repo). On the PHP side (separate project),
-finish wiring config.php to this project's credenciais.txt and confirm
-pdo_pgsql is enabled before first real use.
+NEXT: Two things user explicitly deferred, still open:
+1. The 8 duplicate Tiflux tickets themselves (361923/361924/361925/361926/
+   361928/361929/361930/361931) still exist and need manual close/merge —
+   only the DB link was fixed, not the Tiflux side.
+2. GLPI titles for those same 8 are inconsistent (some double-prefixed like
+   "#361923 - #361837 - ...", #33923 has no prefix at all) — user said DB
+   only for now, titles left as-is.
+Then commit this code fix (not yet committed).
 
 RISKS:
 - The Windows Scheduled Task `GLPI-Tiflux-Sync` runs `glpi_tiflux.py` directly
@@ -20,6 +27,10 @@ RISKS:
   scheduled task — only with itself (two manual force-sync calls on the
   same id_glpi). A forced run and a concurrent cron pass on the same ticket
   can still race.
+- New link-existing-ticket path depends on Tiflux's `search` query param
+  staying fuzzy-but-title-inclusive; re-filtered client-side on a
+  word-boundary match against `title` only, but if Tiflux ever changes what
+  `search` covers, verify against a real chamado before trusting silently.
 - `_mensagem_de_recusa()`'s "non-empty message = failure" is a heuristic from
   live observation, not documented GLPI behavior.
 - Cascade close/reopen only trusts ITS OWN status 5 as "closed by cascade."
