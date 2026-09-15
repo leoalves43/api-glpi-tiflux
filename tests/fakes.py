@@ -33,6 +33,18 @@ class FakeRequests:
     def programar(self, metodo: str, url_contendo: str, resposta: FakeResponse) -> None:
         self._respostas.setdefault((metodo, url_contendo), []).append(resposta)
 
+    def Session(self):
+        # Produção usa requests.Session() por instância de cliente (reuso de
+        # conexão). O fake não distingue sessão de módulo — devolve a si
+        # mesmo, que já implementa get/post/put e registra tudo em `chamadas`.
+        return self
+
+    def close(self):
+        pass
+
+    def mount(self, *args, **kwargs):
+        pass
+
     def get(self, url, **kwargs):
         return self._responder("GET", url, kwargs)
 

@@ -53,6 +53,26 @@ class TestBuscarChamadosDesde(unittest.TestCase):
             encontrados = client.buscar_chamados_desde(100, limite_por_execucao=3, max_furos_seguidos=50)
         self.assertEqual(encontrados, [100, 101, 102])
 
+    def test_padrao_misto_atravessando_varios_lotes_preserva_ordem(self):
+        """
+        As sondagens de um lote saem em paralelo (ThreadPoolExecutor), então o
+        resultado só está correto se o fold pós-lote respeitar a ordem dos IDs
+        independente da ordem real de conclusão das threads. Programa cada ID
+        com sua própria resposta (não uma fila compartilhada) pra detectar
+        qualquer mistura entre respostas de IDs diferentes.
+        """
+        fake = FakeRequests()
+        respostas = {100: 200, 101: 404, 102: 404, 103: 200, 104: 404, 105: 404, 106: 404}
+        for id_chamado, status in respostas.items():
+            corpo = {"id": id_chamado} if status == 200 else None
+            fake.programar("GET", f"/Ticket/{id_chamado}", FakeResponse(status, corpo))
+        with patch("sync.glpi_client.requests", fake), _sem_console():
+            client = _client(fake)
+            encontrados = client.buscar_chamados_desde(100, limite_por_execucao=10, max_furos_seguidos=3)
+        # 100 acha, 101/102 furam (furos=2), 103 acha (reseta), 104/105/106 furam
+        # (furos=3 == max_furos_seguidos) -> para em 106.
+        self.assertEqual(encontrados, [100, 103])
+
 
 class TestObterTicket(unittest.TestCase):
     def test_encontrado_retorna_dados_e_status(self):

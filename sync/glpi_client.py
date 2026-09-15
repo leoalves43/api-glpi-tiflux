@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+
 import requests
+from requests.adapters import HTTPAdapter
 
 from sync.config import Config, log
 
 Anexo = tuple[str, bytes, str]
+
+# Timeout padrão (segundos) de toda chamada HTTP a este GLPI — sem isso, uma
+# única requisição que trave (rede ou servidor sem resposta) bloqueia a
+# execução inteira do cron indefinidamente em vez de falhar e seguir/retentar
+# na próxima execução.
+TIMEOUT_PADRAO_SEGUNDOS = 30
+
+# Quantas sondagens de buscar_chamados_desde() disparar em paralelo por lote.
+# Também usado como pool_maxsize da sessão HTTP, pra não serializar as
+# conexões concorrentes atrás do pool padrão (10) do requests.
+TAMANHO_LOTE_SONDAGEM_PADRAO = 10
 
 
 def _mensagem_de_recusa(resp: requests.Response) -> str | None:
@@ -28,38 +42,73 @@ def _mensagem_de_recusa(resp: requests.Response) -> str | None:
 class GlpiClient:
     """Wraps a sessão autenticada do GLPI. Uma instância por execução do cron."""
 
-    def __init__(self, url_base: str, app_token: str, headers: dict[str, str]):
+    def __init__(
+        self, url_base: str, app_token: str, headers: dict[str, str], session: requests.Session | None = None,
+        timeout: int = TIMEOUT_PADRAO_SEGUNDOS, tamanho_lote_sondagem: int = TAMANHO_LOTE_SONDAGEM_PADRAO,
+    ):
         self._url_base = url_base
         self._app_token = app_token
         self._headers = headers
+        self._timeout = timeout
+        self._tamanho_lote_sondagem = tamanho_lote_sondagem
+        # Sessão HTTP reutilizada por todas as chamadas desta instância — reusa
+        # a conexão TCP/TLS com o GLPI (keep-alive) em vez de renegociar uma
+        # nova a cada request, que é o que `buscar_chamados_desde()` faz aos
+        # montes (uma sondagem por ID). Ver docs/decisions/LOG.md.
+        self._session = session if session is not None else requests.Session()
+        # Pool do tamanho do lote de sondagem — sem isso, requests concorrentes
+        # acima do pool_maxsize padrão (10) do requests serializam esperando
+        # conexão livre, anulando o ganho de rodar em paralelo.
+        adapter = HTTPAdapter(pool_maxsize=max(tamanho_lote_sondagem, 10))
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
     @classmethod
     def autenticar(cls, config: Config) -> "GlpiClient":
-        resposta = requests.get(
+        session = requests.Session()
+        resposta = session.get(
             f"{config.url_glpi}/initSession",
             headers={"App-Token": config.app_token, "Authorization": f"user_token {config.user_token}"},
+            timeout=config.timeout_http_segundos,
         )
         resposta.raise_for_status()
         session_token = resposta.json().get("session_token")
         headers = {"App-Token": config.app_token, "Session-Token": session_token}
-        return cls(config.url_glpi, config.app_token, headers)
+        return cls(
+            config.url_glpi, config.app_token, headers, session=session,
+            timeout=config.timeout_http_segundos, tamanho_lote_sondagem=config.tamanho_lote_sondagem,
+        )
 
     def encerrar_sessao(self) -> None:
         try:
-            requests.get(f"{self._url_base}/killSession", headers=self._headers)
+            self._session.get(f"{self._url_base}/killSession", headers=self._headers, timeout=self._timeout)
         except requests.RequestException:
             pass
+        finally:
+            self._session.close()
 
     def _get(self, caminho: str, **kwargs) -> requests.Response:
-        return requests.get(f"{self._url_base}{caminho}", headers=self._headers, **kwargs)
+        kwargs.setdefault("timeout", self._timeout)
+        return self._session.get(f"{self._url_base}{caminho}", headers=self._headers, **kwargs)
 
     def buscar_chamados_desde(self, id_inicial: int, limite_por_execucao: int, max_furos_seguidos: int) -> list[int]:
         """
-        Sonda sequencialmente cada ID a partir de id_inicial via GET /Ticket/{id}
-        (o mesmo endpoint, comprovadamente confiável, que já usamos pra buscar os
-        dados de cada chamado). Evitamos o endpoint /search/Ticket porque nessa
-        instalação ele se mostrou inconsistente (campo/boundary/entidade geraram
-        resultados que não batiam com chamados confirmados via GET direto).
+        Sonda cada ID a partir de id_inicial via GET /Ticket/{id} (o mesmo
+        endpoint, comprovadamente confiável, que já usamos pra buscar os dados
+        de cada chamado). Evitamos o endpoint /search/Ticket porque nessa
+        instalação ele se mostrou inconsistente (campo/boundary/entidade
+        geraram resultados que não batiam com chamados confirmados via GET
+        direto).
+
+        As sondagens saem em lotes de até `_tamanho_lote_sondagem` IDs
+        disparados em paralelo (ThreadPoolExecutor) — dentro de cada lote os
+        resultados são dobrados na ordem dos IDs, então o resultado final é
+        idêntico ao de sondar um por um, só que mais rápido: com
+        max_furos_seguidos=50 (default), a cauda de "já estou em dia" que
+        antes era 50 requests sequenciais agora é ~5 lotes paralelos. O
+        tamanho de cada lote também é limitado pelo que falta pra estourar
+        max_furos_seguidos/limite_por_execucao, pra nunca disparar mais
+        sondagens do que a versão sequencial precisaria no pior caso.
 
         Para depois de max_furos_seguidos IDs seguidos sem chamado (assume que
         chegou no fim dos criados até agora), ou ao atingir limite_por_execucao
@@ -69,13 +118,21 @@ class GlpiClient:
         id_atual = id_inicial
         furos_seguidos = 0
 
-        while furos_seguidos < max_furos_seguidos and len(encontrados) < limite_por_execucao:
-            if self._chamado_existe(id_atual):
-                encontrados.append(id_atual)
-                furos_seguidos = 0
-            else:
-                furos_seguidos += 1
-            id_atual += 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self._tamanho_lote_sondagem) as executor:
+            while furos_seguidos < max_furos_seguidos and len(encontrados) < limite_por_execucao:
+                tamanho_lote = min(
+                    self._tamanho_lote_sondagem,
+                    max_furos_seguidos - furos_seguidos,
+                    limite_por_execucao - len(encontrados),
+                )
+                ids_lote = list(range(id_atual, id_atual + tamanho_lote))
+                for id_chamado, existe in zip(ids_lote, executor.map(self._chamado_existe, ids_lote)):
+                    if existe:
+                        encontrados.append(id_chamado)
+                        furos_seguidos = 0
+                    else:
+                        furos_seguidos += 1
+                    id_atual = id_chamado + 1
 
         if furos_seguidos >= max_furos_seguidos:
             log(f"🔎 Sondagem parou após {max_furos_seguidos} IDs seguidos sem chamado "
@@ -131,7 +188,7 @@ class GlpiClient:
         }
         if users_id is not None:
             payload["input"]["users_id"] = users_id
-        resp = requests.post(f"{self._url_base}/ITILFollowup", json=payload, headers=self._headers)
+        resp = self._session.post(f"{self._url_base}/ITILFollowup", json=payload, headers=self._headers, timeout=self._timeout)
         if resp.status_code not in (200, 201):
             return None, f"Falha ao criar followup no GLPI ({resp.status_code}): {resp.text}"
 
@@ -182,7 +239,7 @@ class GlpiClient:
         isso `message` não-vazia conta como falha aqui, mesmo com HTTP 200.
         """
         payload = {"input": campos}
-        resp = requests.put(f"{self._url_base}/Ticket/{id_chamado}", json=payload, headers=self._headers)
+        resp = self._session.put(f"{self._url_base}/Ticket/{id_chamado}", json=payload, headers=self._headers, timeout=self._timeout)
         if resp.status_code not in (200, 201):
             return False, f"Falha ao {acao} chamado #{id_chamado} no GLPI ({resp.status_code}): {resp.text}"
 
@@ -199,7 +256,7 @@ class GlpiClient:
         Retorna (sucesso, erro_ou_None).
         """
         payload = {"input": {"tickets_id": id_chamado, "users_id": id_usuario, "type": 2}}
-        resp = requests.post(f"{self._url_base}/Ticket_User", json=payload, headers=self._headers)
+        resp = self._session.post(f"{self._url_base}/Ticket_User", json=payload, headers=self._headers, timeout=self._timeout)
         if resp.status_code not in (200, 201):
             return False, f"Falha ao atribuir técnico no GLPI ao chamado #{id_chamado} ({resp.status_code}): {resp.text}"
         return True, None
@@ -221,7 +278,7 @@ class GlpiClient:
         Retorna (sucesso, erro_ou_None).
         """
         payload = {"input": {"itemtype": "Ticket", "items_id": id_chamado, "content": conteudo}}
-        resp = requests.post(f"{self._url_base}/ITILSolution", json=payload, headers=self._headers)
+        resp = self._session.post(f"{self._url_base}/ITILSolution", json=payload, headers=self._headers, timeout=self._timeout)
         if resp.status_code not in (200, 201):
             return False, f"Falha ao registrar solução no GLPI pro chamado #{id_chamado} ({resp.status_code}): {resp.text}"
         return True, None

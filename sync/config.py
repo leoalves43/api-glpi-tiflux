@@ -99,6 +99,14 @@ class Config:
     # fim dos chamados criados até agora e parar de sondar nessa execução.
     max_furos_seguidos: int = 50
 
+    # Timeout (segundos) de toda chamada HTTP a GLPI/Tiflux — bloqueia uma
+    # requisição travada em vez de deixar a execução inteira pendurada.
+    timeout_http_segundos: int = 30
+
+    # Quantas sondagens de GlpiClient.buscar_chamados_desde() disparar em
+    # paralelo por lote (também vira o pool_maxsize da sessão HTTP do GLPI).
+    tamanho_lote_sondagem: int = 10
+
     @staticmethod
     def carregar(caminho_credenciais: str = "credenciais.txt") -> "Config":
         cred = carregar_credenciais(caminho_credenciais)
