@@ -15,7 +15,18 @@ now has a 30s `timeout` (config.timeout_http_segundos); `buscar_chamados_desde()
 sondagem now probes in parallel batches (ThreadPoolExecutor, default 10,
 config.tamanho_lote_sondagem) instead of one ID at a time. All perf work on
 "execução muito demorada" (see decisions/LOG.md 2026-09-15 entries). 194 tests
-green.
+green. Committed and pushed (7b98d4d).
+
+DONE (2026-09-15): `GLPI-Tiflux-Sync` Scheduled Task actually registered and
+confirmed running on this machine for the first time this session (it was
+NOT running before, despite the old RISKS note below implying it was already
+live) — `run_glpi_tiflux.bat` + `scripts/setup_scheduled_task.ps1` already
+existed, just never executed. Hit and fixed two SYSTEM-account environment
+gaps along the way: Python was per-user-only (SYSTEM couldn't find it at
+all) and, after reinstalling Python machine-wide, pip kept "satisfying" from
+the per-user site-packages instead of installing to the machine-wide one
+(needed `PYTHONNOUSERSITE=1` to force it) — see decisions/LOG.md. Confirmed
+via `logs/glpi_tiflux.log`: clean runs, no traceback.
 
 NEXT:
 1. Followups loop (`sincronizar_followups`, up to 50 chamados/run x ~3-6
@@ -23,16 +34,15 @@ NEXT:
    Postgres connection-per-thread or write-locking scheme first (shared
    psycopg2 `conn` isn't safe for concurrent multi-thread writes) — deferred,
    not started.
-2. Confirm in production that the parallel sondagem doesn't trip anything on
-   the GLPI side (rate limiting, session contention) — only tested against
-   fakes locally, never run live yet.
+2. Confirm over a longer stretch that the parallel sondagem doesn't trip
+   anything on the GLPI side (rate limiting, session contention) — only
+   watched a couple of cycles so far.
 3. The 8 duplicate Tiflux tickets themselves (361923/361924/361925/361926/
    361928/361929/361930/361931) still exist and need manual close/merge —
    only the DB link was fixed, not the Tiflux side (deferred by user).
 4. GLPI titles for those same 8 are inconsistent (some double-prefixed like
    "#361923 - #361837 - ...", #33923 has no prefix at all) — user said DB
    only for now, titles left as-is (deferred by user).
-Then commit these code changes (not yet committed).
 
 RISKS:
 - The Windows Scheduled Task `GLPI-Tiflux-Sync` runs `glpi_tiflux.py` directly
@@ -60,8 +70,12 @@ RISKS:
   back, or 404 across every recent confirmation, needs `forcar_sincronizacao.py`
   or manual recovery like #33769 was.
 - Sondagem now fires up to `tamanho_lote_sondagem` (default 10) concurrent
-  GET requests at the GLPI instance instead of one at a time — never
-  validated against real GLPI load, only against fakes; if this GLPI install
-  can't handle it, lower `Config.tamanho_lote_sondagem` (no code change).
+  GET requests at the GLPI instance instead of one at a time — only observed
+  over a couple of live 5-min cycles so far (clean, no errors), not a
+  sustained load test; if this GLPI install ever struggles with it, lower
+  `Config.tamanho_lote_sondagem` (no code change).
+- This machine's Python is now installed machine-wide (`C:\Program
+  Files\Python313`), not per-user — if anything else on this machine assumed
+  the old per-user install path/site-packages, it may need attention.
 
 CONTEXT: decisions/LOG.md has full rationale per change; ARCHITECTURE.md for module map.
