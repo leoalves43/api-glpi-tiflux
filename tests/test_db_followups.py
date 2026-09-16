@@ -51,6 +51,23 @@ class TestRegistrarResultadoFollowup(unittest.TestCase):
         self.assertEqual(conn.commits, 1)
 
 
+class TestObterUltimaAcaoCascataSucesso(unittest.TestCase):
+    def test_retorna_tipo_quando_ha_linha_de_sucesso(self):
+        conn = FakeConnection(respostas=[[("encerramento",)]])
+        self.assertEqual(db_followups.obter_ultima_acao_cascata_sucesso(conn, _CONFIG, 42), "encerramento")
+
+    def test_none_quando_nunca_houve_acao_de_cascata(self):
+        conn = FakeConnection(respostas=[[]])
+        self.assertIsNone(db_followups.obter_ultima_acao_cascata_sucesso(conn, _CONFIG, 42))
+
+    def test_usa_id_glpi_negativo_e_filtra_por_sucesso(self):
+        conn = FakeConnection(respostas=[[]])
+        db_followups.obter_ultima_acao_cascata_sucesso(conn, _CONFIG, 42)
+        sql, params = conn.execucoes[0]
+        self.assertIn("status = 'sucesso'", sql)
+        self.assertEqual(params, (-42,))
+
+
 class TestRegistrarChamadoFechadoParaFollowups(unittest.TestCase):
     def test_usa_id_negativo_como_sentinela(self):
         conn = FakeConnection()

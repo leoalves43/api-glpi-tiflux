@@ -32,6 +32,12 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
      Tiflux `/answers`, `/client-answers`, or `/internal_communications`.
    - `sincronizar_followups_tiflux_para_glpi()` — Tiflux answers/internal
      communications -> GLPI `ITILFollowup`.
+   Cascade status sync is otherwise Tiflux -> GLPI only, with one exception:
+   if a chamado this integration cascade-closed (GLPI Solucionado) comes back
+   open in GLPI while Tiflux is still closed (solution refused, or reopened
+   manually), `_reabrir_tiflux_apos_recusa_glpi()` reopens the Tiflux ticket
+   (`TifluxClient.reabrir_ticket`) instead of re-closing GLPI. See
+   decisions/LOG.md 2026-09-16.
 
 ## Modules
 

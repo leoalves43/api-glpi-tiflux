@@ -96,6 +96,8 @@ class FakeTifluxClient:
         self.comunicacoes: list[dict] = []
         self.publicacoes: list[tuple] = []
         self.resposta_publicacao = _FakeHttpResponse(201, {"id": 555})
+        self.tickets_reabertos: list[str] = []
+        self.resultado_reabrir_ticket: tuple[bool, str | None] = (True, None)
 
     def validar_mesa_do_cliente(self, id_mesa):
         return True if self.mesas_validas is None else id_mesa in self.mesas_validas
@@ -136,6 +138,13 @@ class FakeTifluxClient:
     def publicar_resposta_agente(self, ticket_number, conteudo):
         self.publicacoes.append(("agente", ticket_number, conteudo))
         return self.resposta_publicacao
+
+    def reabrir_ticket(self, ticket_number):
+        self.tickets_reabertos.append(ticket_number)
+        sucesso, erro = self.resultado_reabrir_ticket
+        if sucesso and self.ticket_tiflux is not None:
+            self.ticket_tiflux = {**self.ticket_tiflux, "is_closed": False}
+        return sucesso, erro
 
 
 class _FakeHttpResponse:

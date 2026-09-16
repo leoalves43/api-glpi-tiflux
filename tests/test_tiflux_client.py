@@ -234,6 +234,40 @@ class TestEnviarAnexos(unittest.TestCase):
         self.assertEqual(len(motivos), 1)
 
 
+class TestReabrirTicket(unittest.TestCase):
+    def test_sucesso(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(200, {"message": "Ticket T-1 reopened successfully"}))
+        with patch("sync.tiflux_client.requests", fake):
+            sucesso, erro = _client().reabrir_ticket("T-1")
+        self.assertEqual((sucesso, erro), (True, None))
+
+    def test_ja_aberto_conta_como_sucesso_idempotente(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(
+            422, text='{"detail": {"error": ["Unable to reopen. Ticket is already open"]}}',
+        ))
+        with patch("sync.tiflux_client.requests", fake):
+            sucesso, erro = _client().reabrir_ticket("T-1")
+        self.assertEqual((sucesso, erro), (True, None))
+
+    def test_outra_falha_422_e_erro(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(422, text="Ticket faturado, não pode reabrir"))
+        with patch("sync.tiflux_client.requests", fake):
+            sucesso, erro = _client().reabrir_ticket("T-1")
+        self.assertFalse(sucesso)
+        self.assertIn("422", erro)
+
+    def test_falha_http_retorna_erro(self):
+        fake = FakeRequests()
+        fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(500, text="fora do ar"))
+        with patch("sync.tiflux_client.requests", fake):
+            sucesso, erro = _client().reabrir_ticket("T-1")
+        self.assertFalse(sucesso)
+        self.assertIn("500", erro)
+
+
 class TestListarPaginado(unittest.TestCase):
     def test_para_quando_pagina_vem_menor_que_o_tamanho(self):
         fake = FakeRequests()

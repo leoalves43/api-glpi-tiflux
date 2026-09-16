@@ -1,1 +1,1 @@
-py glpi_tiflux.py >> logs\glpi_tiflux.log 2>&1
+python glpi_tiflux.py >> logs\glpi_tiflux.log 2>&1

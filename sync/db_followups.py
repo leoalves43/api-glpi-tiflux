@@ -102,6 +102,28 @@ def registrar_resultado_followup(
     conn.commit()
 
 
+def obter_ultima_acao_cascata_sucesso(conn, config: Config, id_glpi: int) -> str | None:
+    """
+    `tipo` ('encerramento', 'reabertura' ou 'reabertura_tiflux') da última
+    ação de encerramento/reabertura em cascata BEM-SUCEDIDA registrada pra
+    este chamado — linha única por chamado (direcao='tiflux_para_glpi',
+    id_origem=-id_glpi, ver _mudar_status_em_cascata e
+    _reabrir_tiflux_apos_recusa_glpi em sincronizacao_followups.py). None se
+    nunca houve uma ação de cascata bem-sucedida, ou se a última tentativa
+    registrada falhou (status='erro') — só o último estado confirmado conta,
+    pra não confundir com uma tentativa que não mudou nada de fato.
+    """
+    tabela = config.tabela_followups
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT tipo FROM {tabela} "
+            f"WHERE direcao = 'tiflux_para_glpi' AND id_origem = %s AND status = 'sucesso'",
+            (-id_glpi,),
+        )
+        linha = cur.fetchone()
+        return linha[0] if linha else None
+
+
 def registrar_chamado_fechado_para_followups(conn, config: Config, id_glpi: int) -> None:
     """
     Marca (sem sincronizar nenhum followup) que este chamado foi conferido e

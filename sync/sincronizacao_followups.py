@@ -81,6 +81,22 @@ def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tifl
         _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, ticket_glpi, ticket_tiflux, totais)
         return
 
+    if (
+        ticket_tiflux
+        and ticket_tiflux.get("is_closed")
+        and db_followups.obter_ultima_acao_cascata_sucesso(conn, config, id_glpi) == "encerramento"
+    ):
+        # Chamado tinha sido encerrado em cascata (Tiflux fechado -> GLPI
+        # Solucionado) e voltou a ficar aberto no GLPI (recusa da solução
+        # pelo requerente, ou reabertura manual) sem que o Tiflux tenha sido
+        # reaberto — essa integração não escuta esse evento no GLPI, então
+        # reabre o Tiflux aqui pra equalizar. Sem isso, o followup da própria
+        # recusa nunca seria publicado no Tiflux (422 "Cannot add answer in a
+        # closed ticket") e o encerramento em cascata logo abaixo reabriria
+        # o ciclo, forçando o GLPI de volta pra Solucionado.
+        if _reabrir_tiflux_apos_recusa_glpi(conn, config, tiflux, id_glpi, numero_tiflux, totais):
+            ticket_tiflux, _ = tiflux.obter_ticket(numero_tiflux)
+
     s, e = sincronizar_followups_glpi_para_tiflux(conn, config, glpi, tiflux, id_glpi, numero_tiflux)
     totais["g2t_sucesso"] += s
     totais["g2t_erro"] += e
@@ -175,6 +191,35 @@ def _mudar_status_em_cascata(conn, config, glpi: GlpiClient, id_glpi, numero_tif
         "sucesso" if sucesso else "erro", mensagem,
     )
     totais["status_sucesso" if sucesso else "status_erro"] += 1
+
+
+def _reabrir_tiflux_apos_recusa_glpi(conn, config, tiflux: TifluxClient, id_glpi, numero_tiflux, totais) -> bool:
+    """
+    Reabre o ticket no Tiflux (ver TifluxClient.reabrir_ticket) e registra o
+    resultado na mesma linha de auditoria de cascata do chamado (tipo
+    'reabertura_tiflux'). O followup da recusa em si não é publicado aqui —
+    volta a ser elegível pra sincronizar_followups_glpi_para_tiflux() assim
+    que o Tiflux deixa de estar fechado (chamado pelo caller logo em
+    seguida), mesmo caminho de qualquer followup pendente novo.
+    Se essa tentativa falhar, o registro fica com status='erro' e
+    obter_ultima_acao_cascata_sucesso() deixa de enxergar o 'encerramento'
+    anterior como confirmado — a próxima execução cai no encerramento em
+    cascata normal (linha ~93) em vez de retentar a reabertura, já que Tiflux
+    ainda aparece fechado. Falha rara (erro de rede na chamada de reabrir);
+    aceito como limitação conhecida, não uma máquina de estados completa.
+    """
+    sucesso, erro = tiflux.reabrir_ticket(numero_tiflux)
+    mensagem = (
+        f"Chamado #{id_glpi} reaberto no GLPI (provável recusa da solução) — "
+        f"ticket Tiflux #{numero_tiflux} reaberto para equalizar"
+        if sucesso else erro
+    )
+    db_followups.registrar_resultado_followup(
+        conn, config, id_glpi, numero_tiflux, "tiflux_para_glpi", "reabertura_tiflux", -id_glpi, None,
+        "sucesso" if sucesso else "erro", mensagem,
+    )
+    totais["status_sucesso" if sucesso else "status_erro"] += 1
+    return sucesso
 
 
 # --- GLPI -> Tiflux -----------------------------------------------------

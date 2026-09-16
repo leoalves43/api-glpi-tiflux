@@ -362,5 +362,64 @@ class TestReaberturaEmCascata(unittest.TestCase):
         self.assertEqual(self.glpi.chamados_encerrados, [])
 
 
+class TestReaberturaTifluxAposRecusaGlpi(unittest.TestCase):
+    def setUp(self):
+        self.glpi = FakeGlpiClient()
+        self.tiflux = FakeTifluxClient()
+        self.glpi.tickets[1] = {"status": 1}  # aberto no GLPI de novo
+        self.tiflux.ticket_tiflux = {"is_closed": True, "desk": {"id": 37964}}
+
+    def test_recusa_apos_encerramento_em_cascata_reabre_o_tiflux(self):
+        conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.tiflux.tickets_reabertos, ["T-1"])
+
+    def test_apos_reabrir_o_tiflux_nao_encerra_o_glpi_de_novo(self):
+        conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.chamados_encerrados, [])
+
+    def test_reabertura_e_registrada_na_auditoria(self):
+        conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertTrue(any(
+            "reabertura_tiflux" in params and "sucesso" in params for _, params in conn.execucoes
+        ))
+
+    def test_followup_da_recusa_e_publicado_no_tiflux_apos_reabrir(self):
+        # A recusa em si chega como um followup novo no GLPI; só é publicável
+        # no Tiflux depois que o ticket reabre — sem tratamento especial, é o
+        # mesmo caminho de qualquer followup pendente.
+        self.glpi.followups[1] = [{"id": 10, "content": "recusado, favor verificar", "is_private": 0, "users_id": 42}]
+        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 42)
+        conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(len(self.tiflux.publicacoes), 1)
+
+    def test_sem_historico_de_encerramento_em_cascata_nao_reabre_o_tiflux(self):
+        # Tiflux fechado por um humano direto, chamado nunca foi encerrado em
+        # cascata por esta integração — deve seguir o caminho normal
+        # (encerrar o GLPI em cascata), não reabrir o Tiflux.
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.tiflux.tickets_reabertos, [])
+        self.assertEqual(self.glpi.chamados_encerrados, [(1, 5)])
+
+    def test_ultima_acao_de_cascata_foi_reabertura_nao_reabre_de_novo(self):
+        # Já reaberto numa execução anterior (tipo='reabertura_tiflux') —
+        # não deve tentar de novo.
+        conn = FakeConnection(respostas=[[(1, "T-1")], [("reabertura_tiflux",)], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.tiflux.tickets_reabertos, [])
+
+    def test_falha_ao_reabrir_e_registrada_como_erro(self):
+        self.tiflux.resultado_reabrir_ticket = (False, "Falha ao reabrir ticket no Tiflux (500): boom")
+        conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertTrue(any(
+            "reabertura_tiflux" in params and "erro" in params for _, params in conn.execucoes
+        ))
+
+
 if __name__ == "__main__":
     unittest.main()
