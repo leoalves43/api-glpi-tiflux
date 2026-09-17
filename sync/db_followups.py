@@ -91,6 +91,7 @@ def registrar_resultado_followup(
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, now(), now())
             ON CONFLICT (direcao, id_origem) DO UPDATE SET
                 numero_tiflux = EXCLUDED.numero_tiflux,
+                tipo          = EXCLUDED.tipo,
                 id_destino    = EXCLUDED.id_destino,
                 status        = EXCLUDED.status,
                 mensagem      = EXCLUDED.mensagem,

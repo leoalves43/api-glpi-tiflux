@@ -50,6 +50,23 @@ class TestRegistrarResultadoFollowup(unittest.TestCase):
         self.assertEqual(params, (1, "T1", "glpi_para_tiflux", "publica", 55, 77, "sucesso", "ok"))
         self.assertEqual(conn.commits, 1)
 
+    def test_upsert_atualiza_tipo_em_conflito(self):
+        """
+        Regressão: a linha única de cascata por chamado (id_origem=-id_glpi)
+        é reaproveitada entre 'encerramento', 'reabertura' e
+        'reabertura_tiflux' — sem `tipo` no SET do ON CONFLICT, a coluna
+        ficava travada no valor do primeiro insert pra sempre, e
+        obter_ultima_acao_cascata_sucesso() nunca via a ação mais recente
+        (confirmado ao vivo: um 2º encerramento no Tiflux acabava reaberto
+        de novo, porque `tipo` ainda lia 'encerramento').
+        """
+        conn = FakeConnection()
+        db_followups.registrar_resultado_followup(
+            conn, _CONFIG, 1, "T1", "tiflux_para_glpi", "encerramento", -1, None, "sucesso", "ok",
+        )
+        sql, _ = conn.execucoes[0]
+        self.assertIn("tipo          = EXCLUDED.tipo", sql)
+
 
 class TestObterUltimaAcaoCascataSucesso(unittest.TestCase):
     def test_retorna_tipo_quando_ha_linha_de_sucesso(self):
