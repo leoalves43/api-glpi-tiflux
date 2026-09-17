@@ -13,22 +13,31 @@ DONE (2026-09-17):
    #34187's row was manually repaired (user-approved one-off UPDATE); 2 more
    affected chamados found (#33898, #33753) but both dormant/closed on both
    sides — left alone, will self-correct on their next real cascade write.
+   CONFIRMED live: forced a full `_sincronizar_chamado_aberto()` cycle on
+   #34187 after the fix and it correctly reopened Tiflux this time (audit
+   row's `tipo` now reads `reabertura_tiflux`/`sucesso`, matching reality).
+3. `GlpiClient.solucao_registrada()` now ignores refused (`status==4`)
+   solutions — was checking "any solution ever", so a second close-after-
+   refusal cycle never registered a new solution in GLPI, just moved the
+   status. Confirmed live on #34187: GLPI accepts a second `ITILSolution`
+   fine even with a refused one already on the ticket.
 
 NEXT:
-1. Watch #34187 through one more full cycle (close in Tiflux -> cascade
-   closes GLPI) to confirm the upsert fix converges correctly now that
-   `tipo` updates live. Not yet re-tested after the fix.
-2. The 2026-09-16 403 ("You are not allowed to review this ticket") is
+1. The 2026-09-16 403 ("You are not allowed to review this ticket") is
    STILL UNCONFIRMED as fixed — #362498 was in Tiflux's "pending review"
    window, which per the OpenAPI spec's badges doesn't require the
    permission that blocked #34018/#362124 (fully closed, outside that
    window). Re-test `reabrir_ticket` against a fully-closed Tiflux ticket
    (e.g. #362124) to know if Tiflux actually granted the permission.
-3. Followups loop needs a Postgres connection-per-thread/locking scheme
+2. Followups loop needs a Postgres connection-per-thread/locking scheme
    before it can parallelize like sondagem already does — not started.
-4. The 8 duplicate Tiflux tickets from the 2026-09-14 bug still need manual
+3. The 8 duplicate Tiflux tickets from the 2026-09-14 bug still need manual
    close/merge in Tiflux (DB link already fixed); their GLPI titles are
    still inconsistent — both deferred by user.
+4. User is now testing #34187 by forcing sync themselves (not asking the
+   integration to be manually poked per-ticket anymore) — let the cron/
+   `forcar_sincronizacao` converge on their own pace; don't intervene on
+   that chamado's audit rows again unless asked.
 
 RISKS:
 - Scheduled Task `GLPI-Tiflux-Sync` runs this working directory's code

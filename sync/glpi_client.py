@@ -283,13 +283,26 @@ class GlpiClient:
             return False, f"Falha ao registrar solução no GLPI pro chamado #{id_chamado} ({resp.status_code}): {resp.text}"
         return True, None
 
+    _STATUS_SOLUCAO_RECUSADA = 4  # confirmado ao vivo em GLPI #34187, 2026-09-17
+
     def solucao_registrada(self, id_chamado: int) -> bool:
-        """GET /Ticket/{id}/ITILSolution — True se já existe pelo menos uma solução, pra não duplicar em retries."""
+        """
+        GET /Ticket/{id}/ITILSolution — True se existe alguma solução que não
+        tenha sido recusada pelo requerente. Uma solução recusada não conta:
+        o ciclo de encerramento em cascata (ver _encerrar_em_cascata) reabre
+        o chamado e pode fechá-lo de novo mais tarde, e nesse reencerramento
+        precisa de uma solução NOVA (o conteúdo mais recente do Tiflux) —
+        contar a recusada como "já registrada" bloqueava isso pra sempre,
+        confirmado ao vivo: reabrir e fechar #34187 uma segunda vez nunca
+        registrava solução nenhuma no GLPI, só mudava o status.
+        """
         resp = self._get(f"/Ticket/{id_chamado}/ITILSolution")
         if resp.status_code not in (200, 206):
             return False
         dados = resp.json()
-        return isinstance(dados, list) and len(dados) > 0
+        if not isinstance(dados, list):
+            return False
+        return any(s.get("status") != self._STATUS_SOLUCAO_RECUSADA for s in dados)
 
     def obter_requerente(self, id_chamado: int, ticket: dict) -> tuple[str, str | None, int | None]:
         """Resolve nome, e-mail e id do requerente (Ticket_User type=1) de um chamado."""

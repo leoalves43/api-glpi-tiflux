@@ -228,7 +228,7 @@ class TestRegistrarSolucao(unittest.TestCase):
 class TestSolucaoRegistrada(unittest.TestCase):
     def test_ja_tem_solucao(self):
         fake = FakeRequests()
-        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(200, [{"id": 1}]))
+        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(200, [{"id": 1, "status": 2}]))
         with patch("sync.glpi_client.requests", fake):
             self.assertTrue(_client(fake).solucao_registrada(1))
 
@@ -243,6 +243,26 @@ class TestSolucaoRegistrada(unittest.TestCase):
         fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(500, text="erro"))
         with patch("sync.glpi_client.requests", fake):
             self.assertFalse(_client(fake).solucao_registrada(1))
+
+    def test_solucao_recusada_nao_conta(self):
+        """
+        Regressão: uma solução recusada (status=4) não deve bloquear um
+        reencerramento em cascata registrando uma solução nova — confirmado
+        ao vivo em #34187, onde fechar o Tiflux uma segunda vez depois da
+        recusa nunca registrava solução nenhuma no GLPI.
+        """
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(200, [{"id": 1, "status": 4}]))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertFalse(_client(fake).solucao_registrada(1))
+
+    def test_uma_solucao_valida_entre_recusadas_conta(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/Ticket/1/ITILSolution", FakeResponse(
+            200, [{"id": 1, "status": 4}, {"id": 2, "status": 3}],
+        ))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertTrue(_client(fake).solucao_registrada(1))
 
 
 class TestAtualizarTitulo(unittest.TestCase):
