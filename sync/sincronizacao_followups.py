@@ -208,7 +208,8 @@ def _reabrir_tiflux_apos_recusa_glpi(conn, config, tiflux: TifluxClient, id_glpi
     ainda aparece fechado. Falha rara (erro de rede na chamada de reabrir);
     aceito como limitação conhecida, não uma máquina de estados completa.
     """
-    sucesso, erro = tiflux.reabrir_ticket(numero_tiflux)
+    motivo = f"Solução recusada pelo requerente no GLPI (chamado #{id_glpi})"
+    sucesso, erro = tiflux.reabrir_ticket(numero_tiflux, motivo)
     mensagem = (
         f"Chamado #{id_glpi} reaberto no GLPI (provável recusa da solução) — "
         f"ticket Tiflux #{numero_tiflux} reaberto para equalizar"

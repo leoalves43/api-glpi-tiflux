@@ -239,8 +239,21 @@ class TestReabrirTicket(unittest.TestCase):
         fake = FakeRequests()
         fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(200, {"message": "Ticket T-1 reopened successfully"}))
         with patch("sync.tiflux_client.requests", fake):
-            sucesso, erro = _client().reabrir_ticket("T-1")
+            sucesso, erro = _client().reabrir_ticket("T-1", "recusa do requerente")
         self.assertEqual((sucesso, erro), (True, None))
+
+    def test_envia_disapproval_reason_no_corpo(self):
+        """
+        Regressão: sem `disapproval_reason` a API recusa com 422 error_code
+        42207 quando o ticket está pendente de revisão (confirmado ao vivo
+        contra Tiflux #362498 — ver docs/decisions/LOG.md).
+        """
+        fake = FakeRequests()
+        fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(200, {"message": "Ticket T-1 reopened successfully"}))
+        with patch("sync.tiflux_client.requests", fake):
+            _client().reabrir_ticket("T-1", "recusa do requerente")
+        _, _, kwargs = fake.chamadas[0]
+        self.assertEqual(kwargs["json"], {"disapproval_reason": "recusa do requerente"})
 
     def test_ja_aberto_conta_como_sucesso_idempotente(self):
         fake = FakeRequests()
@@ -248,14 +261,14 @@ class TestReabrirTicket(unittest.TestCase):
             422, text='{"detail": {"error": ["Unable to reopen. Ticket is already open"]}}',
         ))
         with patch("sync.tiflux_client.requests", fake):
-            sucesso, erro = _client().reabrir_ticket("T-1")
+            sucesso, erro = _client().reabrir_ticket("T-1", "recusa do requerente")
         self.assertEqual((sucesso, erro), (True, None))
 
     def test_outra_falha_422_e_erro(self):
         fake = FakeRequests()
         fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(422, text="Ticket faturado, não pode reabrir"))
         with patch("sync.tiflux_client.requests", fake):
-            sucesso, erro = _client().reabrir_ticket("T-1")
+            sucesso, erro = _client().reabrir_ticket("T-1", "recusa do requerente")
         self.assertFalse(sucesso)
         self.assertIn("422", erro)
 
@@ -263,7 +276,7 @@ class TestReabrirTicket(unittest.TestCase):
         fake = FakeRequests()
         fake.programar("PUT", "/tickets/T-1/reopen", FakeResponse(500, text="fora do ar"))
         with patch("sync.tiflux_client.requests", fake):
-            sucesso, erro = _client().reabrir_ticket("T-1")
+            sucesso, erro = _client().reabrir_ticket("T-1", "recusa do requerente")
         self.assertFalse(sucesso)
         self.assertIn("500", erro)
 

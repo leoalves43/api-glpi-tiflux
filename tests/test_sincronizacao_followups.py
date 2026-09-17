@@ -372,7 +372,10 @@ class TestReaberturaTifluxAposRecusaGlpi(unittest.TestCase):
     def test_recusa_apos_encerramento_em_cascata_reabre_o_tiflux(self):
         conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])
         sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
-        self.assertEqual(self.tiflux.tickets_reabertos, ["T-1"])
+        self.assertEqual(len(self.tiflux.tickets_reabertos), 1)
+        ticket_reaberto, motivo = self.tiflux.tickets_reabertos[0]
+        self.assertEqual(ticket_reaberto, "T-1")
+        self.assertIn("1", motivo)  # id_glpi referenciado no motivo
 
     def test_apos_reabrir_o_tiflux_nao_encerra_o_glpi_de_novo(self):
         conn = FakeConnection(respostas=[[(1, "T-1")], [("encerramento",)], [], []])

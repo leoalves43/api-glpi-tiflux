@@ -256,18 +256,26 @@ class TifluxClient:
 
         return enviados, falhados, motivos
 
-    def reabrir_ticket(self, ticket_number: str) -> tuple[bool, str | None]:
+    def reabrir_ticket(self, ticket_number: str, motivo_reprovacao: str) -> tuple[bool, str | None]:
         """
         PUT /tickets/{ticket_number}/reopen. Usado quando o chamado volta a
         ficar aberto no GLPI (ex.: requerente recusa a solução) enquanto o
         ticket correspondente no Tiflux segue fechado por um encerramento em
         cascata anterior — ver _reabrir_tiflux_apos_recusa_glpi em
-        sincronizacao_followups.py. 422 "already open" conta como sucesso
-        (idempotente: pode acontecer se uma tentativa anterior já reabriu,
-        mas a confirmação falhou por timeout). Retorna (sucesso, erro_ou_None).
+        sincronizacao_followups.py. Um ticket "pendente de revisão" no Tiflux
+        só reabre por reprovação, o que exige `disapproval_reason` no corpo
+        (confirmado ao vivo: sem esse atributo a API recusa com 422
+        error_code 42207 "does not meet the required conditions"); tickets
+        fechados fora da janela de revisão ignoram o campo. 422 "already
+        open" conta como sucesso (idempotente: pode acontecer se uma
+        tentativa anterior já reabriu, mas a confirmação falhou por timeout).
+        Retorna (sucesso, erro_ou_None).
         """
         resp = self._session.put(
-            f"{self._url_base}/tickets/{ticket_number}/reopen", json={}, headers=self._headers_json, timeout=self._timeout,
+            f"{self._url_base}/tickets/{ticket_number}/reopen",
+            json={"disapproval_reason": motivo_reprovacao},
+            headers=self._headers_json,
+            timeout=self._timeout,
         )
         if resp.status_code == 200:
             return True, None

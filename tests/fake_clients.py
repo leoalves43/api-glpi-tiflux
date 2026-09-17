@@ -139,8 +139,8 @@ class FakeTifluxClient:
         self.publicacoes.append(("agente", ticket_number, conteudo))
         return self.resposta_publicacao
 
-    def reabrir_ticket(self, ticket_number):
-        self.tickets_reabertos.append(ticket_number)
+    def reabrir_ticket(self, ticket_number, motivo_reprovacao):
+        self.tickets_reabertos.append((ticket_number, motivo_reprovacao))
         sucesso, erro = self.resultado_reabrir_ticket
         if sucesso and self.ticket_tiflux is not None:
             self.ticket_tiflux = {**self.ticket_tiflux, "is_closed": False}
