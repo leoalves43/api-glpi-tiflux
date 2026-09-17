@@ -71,7 +71,7 @@ def _processar(glpi: GlpiClient, tiflux: TifluxClient, config: Config, id_chamad
     if id_tecnico_tiflux is not None:
         _atribuir_tecnico(tiflux, ticket_number_tiflux, id_tecnico_tiflux, nome_tecnico_tiflux)
     aviso_titulo = _atualizar_titulo_glpi(glpi, id_chamado, ticket.get("name"), ticket_number_tiflux)
-    aviso_tecnico_glpi = _atribuir_tecnico_glpi(glpi, id_chamado, mesa_tiflux, config, ticket_number_tiflux)
+    aviso_tecnico_glpi = _atribuir_tecnico_glpi(glpi, id_chamado, config, ticket_number_tiflux)
     aviso_status_glpi = _restaurar_status_novo_glpi(glpi, id_chamado, ticket_number_tiflux)
     resumo_anexos = _sincronizar_anexos(glpi, tiflux, config, id_chamado, ticket_number_tiflux)
 
@@ -188,16 +188,16 @@ def _atualizar_titulo_glpi(glpi: GlpiClient, id_chamado: int, titulo_original: s
     return " | Aviso: falha ao prefixar título no GLPI"
 
 
-def _atribuir_tecnico_glpi(glpi: GlpiClient, id_chamado: int, mesa_tiflux: int, config: Config, ticket_number_tiflux: str) -> str:
+def _atribuir_tecnico_glpi(glpi: GlpiClient, id_chamado: int, config: Config, ticket_number_tiflux: str) -> str:
     """
     Atribui um técnico responsável no GLPI (mesma regra de definir_autor_glpi:
-    mesa ARRECADAÇÃO -> Léo, outras mesas -> Sania) — pré-requisito dessa
-    instalação do GLPI pra aceitar status Solucionado/Fechado mais tarde (ver
-    encerramento em cascata em sincronizacao_followups.py). Falha aqui não
-    derruba a sincronização, mesmo motivo do título: reprocessar duplicaria
-    o ticket no Tiflux.
+    sempre Léo, independente da mesa) — pré-requisito dessa instalação do
+    GLPI pra aceitar status Solucionado/Fechado mais tarde (ver encerramento
+    em cascata em sincronizacao_followups.py). Falha aqui não derruba a
+    sincronização, mesmo motivo do título: reprocessar duplicaria o ticket
+    no Tiflux.
     """
-    id_tecnico_glpi = definir_autor_glpi(mesa_tiflux, config)
+    id_tecnico_glpi = definir_autor_glpi(config)
     sucesso, erro = glpi.atribuir_tecnico(id_chamado, id_tecnico_glpi)
     if sucesso:
         return ""

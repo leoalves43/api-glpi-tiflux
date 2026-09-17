@@ -81,9 +81,13 @@ class Config:
 
     id_tecnico_leo: int = 117180
 
-    # IDs de usuário no GLPI (não no Tiflux) usados pra atribuir autoria de
-    # followups Tiflux -> GLPI conforme a mesa do chamado
+    # ID de usuário no GLPI (não no Tiflux) usado pra atribuir autoria de
+    # followups Tiflux -> GLPI e o técnico do chamado, independente da mesa
+    # (renomeado no GLPI pra "Suporte Embras")
     id_glpi_leo: int = 4988
+
+    # Usuária inativada no GLPI — não é mais usada pra novas atribuições,
+    # só reconhecida como autoria própria em followups antigos (anti-eco)
     id_glpi_sania: int = 4816
 
     # Máximo de anexo aceito pelo Tiflux

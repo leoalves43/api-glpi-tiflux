@@ -25,9 +25,9 @@ def _prefixar_autor_tiflux(nome: str | None, timestamp_utc: str | None, conteudo
     """
     Prefixa o conteúdo com o nome de quem respondeu de fato no Tiflux (em
     negrito) e a data/hora do assentamento — a autoria real no GLPI
-    (users_id) segue a regra de mesa (Léo/Sania, ver definir_autor_glpi), não
-    o técnico do Tiflux, então esse prefixo é a única forma de identificar
-    quem respondeu de verdade dentro do texto.
+    (users_id) é sempre Léo (ver definir_autor_glpi), não o técnico do
+    Tiflux, então esse prefixo é a única forma de identificar quem
+    respondeu de verdade dentro do texto.
     """
     cabecalho = f"<strong>{nome or 'Desconhecido'}</strong>"
     data_hora = _formatar_data_hora_brasilia(timestamp_utc)
@@ -101,12 +101,12 @@ def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tifl
     totais["g2t_sucesso"] += s
     totais["g2t_erro"] += e
 
-    s, e = sincronizar_followups_tiflux_para_glpi(conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux)
+    s, e = sincronizar_followups_tiflux_para_glpi(conn, config, glpi, tiflux, id_glpi, numero_tiflux)
     totais["t2g_sucesso"] += s
     totais["t2g_erro"] += e
 
     if ticket_tiflux and ticket_tiflux.get("is_closed"):
-        _encerrar_em_cascata(conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux, totais)
+        _encerrar_em_cascata(conn, config, glpi, tiflux, id_glpi, numero_tiflux, totais)
 
 
 def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, ticket_glpi, ticket_tiflux, totais) -> None:
@@ -138,7 +138,7 @@ def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, 
 _SEM_RESPOSTA_TIFLUX = "Chamado encerrado no Tiflux, sem resposta pública registrada."
 
 
-def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_glpi, numero_tiflux, ticket_tiflux, totais) -> None:
+def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_glpi, numero_tiflux, totais) -> None:
     """
     Essa instalação do GLPI recusa (com HTTP 200 mas message não-vazia, ver
     GlpiClient._atualizar_chamado) mudar o status pra Solucionado sem técnico
@@ -149,8 +149,7 @@ def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, i
     tecnico_atribuido()/solucao_registrada(), não duplica em retries.
     """
     if glpi.tecnico_atribuido(id_glpi) is None:
-        id_mesa = ((ticket_tiflux or {}).get("desk") or {}).get("id")
-        glpi.atribuir_tecnico(id_glpi, definir_autor_glpi(id_mesa, config))
+        glpi.atribuir_tecnico(id_glpi, definir_autor_glpi(config))
 
     if not glpi.solucao_registrada(id_glpi):
         conteudo_solucao = _ultima_resposta_publica_tiflux(tiflux, numero_tiflux, config)
@@ -327,7 +326,6 @@ def _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tip
 
 def sincronizar_followups_tiflux_para_glpi(
     conn, config: Config, glpi: GlpiClient, tiflux: TifluxClient, id_chamado: int, numero_tiflux: str,
-    ticket_tiflux: dict | None,
 ) -> tuple[int, int]:
     """
     Busca respostas públicas (/answers) do ticket no Tiflux, filtra as que
@@ -336,21 +334,15 @@ def sincronizar_followups_tiflux_para_glpi(
     internas (/internal_communications) não são sincronizadas: só comunicação
     pública cruza pro GLPI.
 
-    A autoria do followup no GLPI é definida pela MESA ATUAL do chamado no
-    Tiflux (campo `desk` de ticket_tiflux), não pelo técnico atribuído lá (ver
-    definir_autor_glpi) — sem isso, o GLPI atribui tudo ao usuário autenticado
-    da API, independente de quem respondeu de fato no Tiflux. `ticket_tiflux`
-    vem de uma consulta feita a cada chamada pelo caller (não reaproveitada da
-    criação do ticket), porque tickets podem ser movidos de mesa depois —
-    followups sempre seguem a mesa de agora. Pode vir None se essa consulta
-    falhou; nesse caso cai no autor padrão (Sania, ver definir_autor_glpi).
+    A autoria do followup no GLPI é sempre Léo (ver definir_autor_glpi) — sem
+    isso, o GLPI atribui tudo ao usuário autenticado da API, independente de
+    quem respondeu de fato no Tiflux.
 
     Defesa contra eco: a tabela de auditoria (id já processado) mais o campo
     answer_origin/author.
     Retorna (qtd_sucesso, qtd_erro).
     """
-    id_mesa = ((ticket_tiflux or {}).get("desk") or {}).get("id")
-    id_autor_glpi = definir_autor_glpi(id_mesa, config)
+    id_autor_glpi = definir_autor_glpi(config)
 
     ja_processados_ou_proprios = db_followups.obter_respostas_tiflux_ja_processadas_ou_proprias(conn, config, numero_tiflux)
     respostas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)

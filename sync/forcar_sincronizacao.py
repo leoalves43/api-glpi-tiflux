@@ -195,10 +195,9 @@ def _forcar_followups(conn, config: Config, glpi: GlpiClient, tiflux: TifluxClie
         )
         return
 
-    ticket_tiflux, _ = tiflux.obter_ticket(numero_tiflux)
     sucesso_g2t, erro_g2t = sincronizar_followups_glpi_para_tiflux(conn, config, glpi, tiflux, id_glpi, numero_tiflux)
     sucesso_t2g, erro_t2g = sincronizar_followups_tiflux_para_glpi(
-        conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux,
+        conn, config, glpi, tiflux, id_glpi, numero_tiflux,
     )
 
     mensagem = (

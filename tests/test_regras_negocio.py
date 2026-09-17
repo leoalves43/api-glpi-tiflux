@@ -56,12 +56,8 @@ class TestDefinirTecnico(unittest.TestCase):
 
 
 class TestDefinirAutorGlpi(unittest.TestCase):
-    def test_arrecadacao_vai_para_leo_independente_do_tecnico(self):
-        self.assertEqual(definir_autor_glpi(37964, _CONFIG_TESTE), _CONFIG_TESTE.id_glpi_leo)
-
-    def test_qualquer_outra_mesa_vai_para_sania_independente_do_tecnico(self):
-        for mesa in (37963, 37965, 37966, None):
-            self.assertEqual(definir_autor_glpi(mesa, _CONFIG_TESTE), _CONFIG_TESTE.id_glpi_sania)
+    def test_sempre_leo_independente_da_mesa(self):
+        self.assertEqual(definir_autor_glpi(_CONFIG_TESTE), _CONFIG_TESTE.id_glpi_leo)
 
 
 class TestDefinirPrioridade(unittest.TestCase):

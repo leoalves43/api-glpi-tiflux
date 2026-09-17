@@ -132,77 +132,57 @@ class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
 
     def test_resposta_publica_vira_followup_publico_no_glpi(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.glpi.followups_criados[0]["is_private"], 0)
 
     def test_resposta_publica_e_prefixada_com_autor_e_data_em_negrito(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp", "author": "José Augusto", "answer_time": "2026-09-09T14:10:26Z"}]
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         conteudo = self.glpi.followups_criados[0]["conteudo"]
         self.assertEqual(conteudo, "<strong>José Augusto</strong> (09/09/2026 11:10)<br><br>resp")
-        # autoria real no GLPI (users_id) continua seguindo a mesa, não o autor exibido no texto
-        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
+        # autoria real no GLPI (users_id) é sempre Léo, não o autor exibido no texto
+        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_leo)
 
     def test_comunicacao_interna_no_tiflux_nao_e_sincronizada(self):
         self.tiflux.comunicacoes = [{"id": 2, "text": "com"}]
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 0))
         self.assertEqual(self.glpi.followups_criados, [])
 
     def test_sem_autor_ou_data_usa_desconhecido_e_omite_parenteses(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         conteudo = self.glpi.followups_criados[0]["conteudo"]
         self.assertEqual(conteudo, "<strong>Desconhecido</strong><br><br>resp")
 
-    def test_mesa_arrecadacao_atribui_followup_ao_leo_no_glpi(self):
+    def test_followup_e_sempre_atribuido_ao_leo_no_glpi_independente_da_mesa(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        ticket_tiflux = {"desk": {"id": 37964}}  # ARRECADAÇÃO
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_leo)
-
-    def test_outra_mesa_atribui_followup_a_sania_no_glpi_mesmo_que_o_tecnico_seja_outro(self):
-        self.tiflux.respostas = [{"id": 2, "name": "resp"}]
-        ticket_tiflux = {"desk": {"id": 37965}}  # FINANÇAS
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
-        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
-
-    def test_mesa_atual_prevalece_mesmo_se_ticket_mudou_de_mesa_apos_criado(self):
-        # Chamado criado originalmente em ARRECADAÇÃO, mas já foi movido pra
-        # outra mesa no Tiflux — a autoria do followup deve seguir a mesa ATUAL.
-        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        ticket_tiflux = {"desk": {"id": 37966}}  # SUPRIMENTOS agora
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", ticket_tiflux)
-        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
-
-    def test_mesa_desconhecida_cai_no_padrao_sania(self):
-        self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", None)
-        self.assertEqual(self.glpi.followups_criados[0]["users_id"], _CONFIG.id_glpi_sania)
 
     def test_resposta_de_origem_api_e_ignorada_eco(self):
         self.tiflux.respostas = [{"id": 1, "name": "eco", "answer_origin": "api"}]
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 0))
         self.assertEqual(self.glpi.followups_criados, [])
 
     def test_falha_ao_criar_followup_no_glpi_conta_como_erro(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
         self.glpi.erro_ao_criar_followup = "Falha ao criar followup no GLPI (500): boom"
-        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sucesso, erro = sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (0, 1))
 
     def test_followup_criado_com_sucesso_volta_status_para_novo_no_glpi(self):
         """Criar o followup faz o GLPI mudar o status pra "Processando (atribuído)" automaticamente; deve voltar pra Novo."""
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual(self.glpi.status_restaurados_para_novo, [1])
 
     def test_falha_ao_criar_followup_nao_tenta_voltar_status(self):
         self.tiflux.respostas = [{"id": 1, "name": "resp"}]
         self.glpi.erro_ao_criar_followup = "Falha ao criar followup no GLPI (500): boom"
-        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1", {})
+        sincronizar_followups_tiflux_para_glpi(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual(self.glpi.status_restaurados_para_novo, [])
 
 

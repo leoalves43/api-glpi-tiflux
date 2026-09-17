@@ -112,10 +112,10 @@ class TestProcessarChamado(unittest.TestCase):
         processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
         self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [(1, _CONFIG.id_glpi_leo)])
 
-    def test_sucesso_atribui_tecnico_sania_no_glpi_para_outras_mesas(self):
+    def test_sucesso_atribui_tecnico_leo_no_glpi_para_outras_mesas(self):
         self.glpi.tickets[1] = _TICKET_FINANCAS
         processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
-        self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [(1, _CONFIG.id_glpi_sania)])
+        self.assertEqual(self.glpi.tecnicos_atribuidos_glpi, [(1, _CONFIG.id_glpi_leo)])
 
     def test_falha_ao_atribuir_tecnico_no_glpi_nao_derruba_sincronizacao(self):
         self.glpi.tickets[1] = _TICKET_ARRECADACAO
