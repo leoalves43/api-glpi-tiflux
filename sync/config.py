@@ -21,7 +21,7 @@ def log(msg: str) -> None:
         print(linha.encode(encoding, errors="replace").decode(encoding))
 
 
-def carregar_credenciais(caminho: str = "credenciais.txt") -> dict[str, str]:
+def carregar_credenciais(caminho: str = ".env") -> dict[str, str]:
     credenciais: dict[str, str] = {}
     with open(caminho, "r") as arquivo:
         for linha in arquivo:
@@ -112,7 +112,7 @@ class Config:
     tamanho_lote_sondagem: int = 10
 
     @staticmethod
-    def carregar(caminho_credenciais: str = "credenciais.txt") -> "Config":
+    def carregar(caminho_credenciais: str = ".env") -> "Config":
         cred = carregar_credenciais(caminho_credenciais)
         db_schema = cred.get("DB_SCHEMA", "public")
         db_table = cred.get("DB_TABLE", "api_glpi_tiflux")

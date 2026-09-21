@@ -35,7 +35,7 @@ pip install -r requirements.txt
 
 ## Configuração
 
-Copie `credenciais-exemplo.txt` para `credenciais.txt` na raiz do projeto e
+Copie `exemplo.env` para `.env` na raiz do projeto e
 preencha:
 
 ```
@@ -55,7 +55,7 @@ DB_SCHEMA=
 DB_TABLE=api_glpi_tiflux
 ```
 
-`credenciais.txt` está no `.gitignore` — nunca commitar. Crie as tabelas de
+`.env` está no `.gitignore` — nunca commitar. Crie as tabelas de
 auditoria antes da primeira execução:
 
 ```bash
