@@ -106,7 +106,7 @@ def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tifl
     totais["t2g_erro"] += e
 
     if ticket_tiflux and ticket_tiflux.get("is_closed"):
-        _encerrar_em_cascata(conn, config, glpi, tiflux, id_glpi, numero_tiflux, totais)
+        _encerrar_em_cascata(conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux, totais)
 
 
 def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, ticket_glpi, ticket_tiflux, totais) -> None:
@@ -138,7 +138,7 @@ def _tratar_chamado_fechado_no_glpi(conn, config, glpi, id_glpi, numero_tiflux, 
 _SEM_RESPOSTA_TIFLUX = "Chamado encerrado no Tiflux, sem resposta pública registrada."
 
 
-def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_glpi, numero_tiflux, totais) -> None:
+def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_glpi, numero_tiflux, ticket_tiflux: dict, totais) -> None:
     """
     Essa instalação do GLPI recusa (com HTTP 200 mas message não-vazia, ver
     GlpiClient._atualizar_chamado) mudar o status pra Solucionado sem técnico
@@ -152,7 +152,7 @@ def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, i
         glpi.atribuir_tecnico(id_glpi, definir_autor_glpi(config))
 
     if not glpi.solucao_registrada(id_glpi):
-        conteudo_solucao = _ultima_resposta_publica_tiflux(tiflux, numero_tiflux, config)
+        conteudo_solucao = _ultima_resposta_publica_tiflux(tiflux, numero_tiflux, config, ticket_tiflux)
         glpi.registrar_solucao(id_glpi, conteudo_solucao)
 
     _mudar_status_em_cascata(
@@ -162,13 +162,31 @@ def _encerrar_em_cascata(conn, config, glpi: GlpiClient, tiflux: TifluxClient, i
     )
 
 
-def _ultima_resposta_publica_tiflux(tiflux: TifluxClient, numero_tiflux: str, config: Config) -> str:
+def _mensagem_encerramento_sem_resposta(ticket_tiflux: dict) -> str:
+    """
+    Ticket fechado no Tiflux sem nenhuma resposta pública própria — normalmente
+    porque foi AGRUPADO em outro ticket (is_grouped=True), caso em que a
+    resposta de verdade está no ticket "pai" (ticket_reference), não neste.
+    Confirmado ao vivo no chamado GLPI #34294 / ticket Tiflux #362749: agrupado
+    ao #362748, sem resposta própria, mas fechado igual — o texto genérico
+    "sem resposta pública registrada" mascarava esse motivo e o fazia parecer
+    um chamado abandonado sem retorno.
+    """
+    if not ticket_tiflux.get("is_grouped"):
+        return _SEM_RESPOSTA_TIFLUX
+    numero_pai = (ticket_tiflux.get("ticket_reference") or {}).get("ticket_number")
+    if numero_pai:
+        return f"Chamado encerrado no Tiflux por agrupamento ao ticket #{numero_pai}."
+    return "Chamado encerrado no Tiflux por agrupamento a outro ticket."
+
+
+def _ultima_resposta_publica_tiflux(tiflux: TifluxClient, numero_tiflux: str, config: Config, ticket_tiflux: dict) -> str:
     """A resposta pública (/answers) mais recente do ticket no Tiflux, por answer_time, vira o conteúdo da solução no GLPI (prefixada com autor+data, mesmo padrão dos followups)."""
     respostas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
     if not respostas:
-        return _SEM_RESPOSTA_TIFLUX
+        return _mensagem_encerramento_sem_resposta(ticket_tiflux)
     mais_recente = max(respostas, key=lambda r: r.get("answer_time") or "")
-    conteudo = html.unescape(mais_recente.get("name") or "") or _SEM_RESPOSTA_TIFLUX
+    conteudo = html.unescape(mais_recente.get("name") or "") or _mensagem_encerramento_sem_resposta(ticket_tiflux)
     return _prefixar_autor_tiflux(mais_recente.get("author"), mais_recente.get("answer_time"), conteudo)
 
 

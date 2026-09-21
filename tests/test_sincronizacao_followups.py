@@ -320,6 +320,26 @@ class TestPreparacaoEncerramentoCascata(unittest.TestCase):
         sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
         self.assertEqual(self.glpi.solucoes_registradas, [(1, "Chamado encerrado no Tiflux, sem resposta pública registrada.")])
 
+    def test_sem_resposta_publica_mas_agrupado_usa_texto_de_agrupamento_com_ticket_pai(self):
+        # Ticket agrupado (is_grouped) não tem resposta própria — a resposta de
+        # verdade está no ticket pai (ticket_reference). Ver chamado GLPI #34294
+        # / ticket Tiflux #362749, agrupado ao #362748.
+        self.tiflux.ticket_tiflux = {
+            "is_closed": True, "desk": {"id": 37964},
+            "is_grouped": True, "ticket_reference": {"ticket_number": 362748},
+        }
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.solucoes_registradas, [(1, "Chamado encerrado no Tiflux por agrupamento ao ticket #362748.")])
+
+    def test_agrupado_sem_referencia_de_ticket_pai_usa_texto_generico_de_agrupamento(self):
+        self.tiflux.ticket_tiflux = {
+            "is_closed": True, "desk": {"id": 37964}, "is_grouped": True, "ticket_reference": {},
+        }
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertEqual(self.glpi.solucoes_registradas, [(1, "Chamado encerrado no Tiflux por agrupamento a outro ticket.")])
+
     def test_nao_registra_solucao_de_novo_se_ja_tem(self):
         self.glpi.ja_tem_solucao[1] = True
         conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
