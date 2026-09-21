@@ -11,6 +11,7 @@ class FakeGlpiClient:
         self.followups: dict[int, list[dict]] = {}
         self.requerentes: dict[int, tuple[str, str | None, int | None]] = {}
         self.anexos: dict[int, tuple[list, list]] = {}
+        self.anexos_followup: dict[int, tuple[list, list]] = {}
         self.followups_criados: list[dict] = []
         self.proximo_id_followup = 1000
         self.erro_ao_criar_followup: str | None = None
@@ -41,6 +42,9 @@ class FakeGlpiClient:
 
     def obter_anexos(self, id_chamado, tamanho_maximo_mb):
         return self.anexos.get(id_chamado, ([], []))
+
+    def obter_anexos_do_followup(self, id_followup, tamanho_maximo_mb):
+        return self.anexos_followup.get(id_followup, ([], []))
 
     def obter_followups(self, id_chamado):
         return self.followups.get(id_chamado, [])
@@ -131,12 +135,12 @@ class FakeTifluxClient:
         self.publicacoes.append(("interna", ticket_number, conteudo))
         return self.resposta_publicacao
 
-    def publicar_resposta_cliente(self, ticket_number, conteudo, nome_requerente):
-        self.publicacoes.append(("cliente", ticket_number, conteudo, nome_requerente))
+    def publicar_resposta_cliente(self, ticket_number, conteudo, nome_requerente, anexos=None):
+        self.publicacoes.append(("cliente", ticket_number, conteudo, nome_requerente, anexos or []))
         return self.resposta_publicacao
 
-    def publicar_resposta_agente(self, ticket_number, conteudo):
-        self.publicacoes.append(("agente", ticket_number, conteudo))
+    def publicar_resposta_agente(self, ticket_number, conteudo, anexos=None):
+        self.publicacoes.append(("agente", ticket_number, conteudo, anexos or []))
         return self.resposta_publicacao
 
     def reabrir_ticket(self, ticket_number, motivo_reprovacao):

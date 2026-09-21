@@ -390,5 +390,29 @@ class TestObterAnexos(unittest.TestCase):
         self.assertEqual((anexos, avisos), ([], []))
 
 
+class TestObterAnexosDoFollowup(unittest.TestCase):
+    def test_busca_document_item_do_followup_nao_do_chamado(self):
+        # Regressão: chamado GLPI #34234 / Tiflux #362601 — documento anexado
+        # via followup só aparece em /ITILFollowup/{id}/Document_Item, nunca
+        # em /Ticket/{id}/Document_Item.
+        fake = FakeRequests()
+        fake.programar("GET", "/ITILFollowup/76228/Document_Item", FakeResponse(200, [{"documents_id": 5}]))
+        fake.programar("GET", "/Document/5", FakeResponse(200, {"filename": "planilha.xlsx", "mime": "application/vnd.ms-excel"}))
+        fake.programar("GET", "/Document/5", FakeResponse(200, json_data=None, text="conteudo"))
+        with patch("sync.glpi_client.requests", fake):
+            anexos, avisos = _client(fake).obter_anexos_do_followup(76228, tamanho_maximo_mb=25)
+        self.assertEqual(len(anexos), 1)
+        self.assertEqual(anexos[0][0], "planilha.xlsx")
+        self.assertEqual(avisos, [])
+
+    def test_falha_http_retorna_aviso(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/ITILFollowup/76228/Document_Item", FakeResponse(500, text="erro"))
+        with patch("sync.glpi_client.requests", fake):
+            anexos, avisos = _client(fake).obter_anexos_do_followup(76228, tamanho_maximo_mb=25)
+        self.assertEqual(anexos, [])
+        self.assertEqual(len(avisos), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

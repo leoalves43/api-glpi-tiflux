@@ -123,6 +123,31 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
         self.assertEqual((sucesso, erro), (0, 0))
         self.assertEqual(self.tiflux.publicacoes, [])
 
+    def test_anexo_do_followup_vai_junto_na_resposta_nao_como_anexo_do_chamado(self):
+        # Regressão: chamado GLPI #34234 / Tiflux #362601 — anexo mandado num
+        # followup do requerente nunca aparecia em /Ticket/{id}/Document_Item
+        # (só em /ITILFollowup/{id}/Document_Item), então era descartado.
+        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]
+        self.glpi.tickets[1] = {}
+        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 5)
+        anexo = ("planilha.xlsx", b"conteudo", "application/vnd.ms-excel")
+        self.glpi.anexos_followup[10] = ([anexo], [])
+        sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual((sucesso, erro), (1, 0))
+        self.assertEqual(self.tiflux.publicacoes[0][4], [anexo])
+        self.assertEqual(self.tiflux.resultado_anexos, (0, 0, []))  # nada foi pro nível do chamado
+
+    def test_mais_de_dez_anexos_manda_excedente_pro_nivel_do_chamado(self):
+        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]
+        self.glpi.tickets[1] = {}
+        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 5)
+        anexos = [(f"a{i}.txt", b"x", "text/plain") for i in range(12)]
+        self.glpi.anexos_followup[10] = (anexos, [])
+        self.tiflux.resultado_anexos = (2, 0, [])
+        sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
+        self.assertEqual((sucesso, erro), (1, 0))
+        self.assertEqual(len(self.tiflux.publicacoes[0][4]), 10)
+
 
 class TestSincronizarFollowupsTifluxParaGlpi(unittest.TestCase):
     def setUp(self):

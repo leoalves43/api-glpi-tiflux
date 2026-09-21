@@ -240,7 +240,7 @@ def sincronizar_followups_glpi_para_tiflux(
     qtd_sucesso = qtd_erro = 0
     for followup in pendentes:
         sucesso = _publicar_followup_no_tiflux(
-            conn, config, tiflux, id_chamado, numero_tiflux, followup, nome_requerente, id_requerente_ticket,
+            conn, config, glpi, tiflux, id_chamado, numero_tiflux, followup, nome_requerente, id_requerente_ticket,
         )
         qtd_sucesso, qtd_erro = _acumular(sucesso, qtd_sucesso, qtd_erro)
 
@@ -278,8 +278,16 @@ def _resolver_requerente(glpi: GlpiClient, id_chamado: int) -> tuple[str, int | 
     return nome_requerente, id_requerente_ticket
 
 
+# Limite de arquivos por requisição de resposta no Tiflux (POST .../answers e
+# .../client-answers) — ver openapi-spec-tiflux.json. Followup do GLPI com
+# mais anexos que isso manda o excedente pro nível do chamado (ver
+# _enviar_anexos_excedentes) em vez de descartar.
+_MAX_ANEXOS_POR_RESPOSTA_TIFLUX = 10
+
+
 def _publicar_followup_no_tiflux(
-    conn, config, tiflux: TifluxClient, id_chamado, numero_tiflux, followup, nome_requerente, id_requerente_ticket,
+    conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_chamado, numero_tiflux, followup,
+    nome_requerente, id_requerente_ticket,
 ) -> bool:
     id_origem = followup.get("id")
     # Alguns followups do GLPI vêm com o conteúdo HTML-entity-encoded
@@ -287,19 +295,38 @@ def _publicar_followup_no_tiflux(
     # dependendo de como foram criados; html.unescape() normaliza pros
     # dois casos (é um no-op se o conteúdo já vier como HTML literal).
     conteudo = html.unescape(followup.get("content") or "")
-    tipo, resp = _enviar_followup_para_tiflux(tiflux, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket)
-    return _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tipo, id_origem, resp)
+    anexos, avisos_anexos = glpi.obter_anexos_do_followup(id_origem, config.tamanho_maximo_anexo_mb)
+    anexos_na_resposta = anexos[:_MAX_ANEXOS_POR_RESPOSTA_TIFLUX]
+    anexos_excedentes = anexos[_MAX_ANEXOS_POR_RESPOSTA_TIFLUX:]
+
+    tipo, resp = _enviar_followup_para_tiflux(
+        tiflux, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket, anexos_na_resposta,
+    )
+    sucesso = _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tipo, id_origem, resp, avisos_anexos)
+    if sucesso and anexos_excedentes:
+        _enviar_anexos_excedentes(tiflux, numero_tiflux, id_origem, anexos_excedentes)
+    return sucesso
 
 
-def _enviar_followup_para_tiflux(tiflux: TifluxClient, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket):
+def _enviar_anexos_excedentes(tiflux: TifluxClient, numero_tiflux, id_origem, anexos_excedentes: list) -> None:
+    """Followup com mais de 10 anexos — o excedente vai pro chamado (nível ticket) no Tiflux, perdendo o vínculo visual com o followup, mas sem ser descartado."""
+    _, falhados, motivos = tiflux.enviar_anexos(numero_tiflux, anexos_excedentes)
+    if falhados:
+        log(f"⚠️ Followup GLPI #{id_origem}: {falhados} anexo(s) excedente(s) (>10) falharam ao enviar pro "
+            f"Tiflux #{numero_tiflux}: {'; '.join(motivos)}")
+
+
+def _enviar_followup_para_tiflux(
+    tiflux: TifluxClient, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket, anexos: list,
+):
     id_autor = followup.get("users_id")
 
     if autor_e_solicitante(id_autor, id_requerente_ticket):
-        return "publica", tiflux.publicar_resposta_cliente(numero_tiflux, conteudo, nome_requerente)
-    return "publica", tiflux.publicar_resposta_agente(numero_tiflux, conteudo)
+        return "publica", tiflux.publicar_resposta_cliente(numero_tiflux, conteudo, nome_requerente, anexos)
+    return "publica", tiflux.publicar_resposta_agente(numero_tiflux, conteudo, anexos)
 
 
-def _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tipo, id_origem, resp) -> bool:
+def _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tipo, id_origem, resp, avisos_anexos: list) -> bool:
     if resp.status_code not in (200, 201):
         db_followups.registrar_resultado_followup(
             conn, config, id_chamado, numero_tiflux, "glpi_para_tiflux", tipo, id_origem, None,
@@ -315,9 +342,11 @@ def _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tip
         )
         return False
 
+    mensagem = f"Followup GLPI #{id_origem} publicado no Tiflux (id {id_destino})"
+    if avisos_anexos:
+        mensagem += f" | Avisos anexos: {'; '.join(avisos_anexos)}"
     db_followups.registrar_resultado_followup(
-        conn, config, id_chamado, numero_tiflux, "glpi_para_tiflux", tipo, id_origem, id_destino,
-        "sucesso", f"Followup GLPI #{id_origem} publicado no Tiflux (id {id_destino})",
+        conn, config, id_chamado, numero_tiflux, "glpi_para_tiflux", tipo, id_origem, id_destino, "sucesso", mensagem,
     )
     return True
 

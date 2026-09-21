@@ -367,14 +367,35 @@ class GlpiClient:
 
     def obter_anexos(self, id_chamado: int, tamanho_maximo_mb: int) -> tuple[list[Anexo], list[str]]:
         """
-        Busca os documentos vinculados ao chamado no GLPI (anexos e imagens
-        inseridas na descrição) e baixa o conteúdo binário de cada um.
+        Busca os documentos vinculados diretamente ao CHAMADO no GLPI (anexos e
+        imagens inseridas na descrição) — não inclui documentos anexados via
+        followup, ver obter_anexos_do_followup().
         Retorna (lista_de_anexos, avisos) onde cada anexo é (nome, conteudo_bytes, mime)
         e avisos é uma lista de strings com o que não pôde ser baixado/enviado.
         """
-        resp = self._get(f"/Ticket/{id_chamado}/Document_Item")
+        return self._obter_anexos_de(
+            f"/Ticket/{id_chamado}/Document_Item", tamanho_maximo_mb, "Falha ao listar anexos do chamado no GLPI",
+        )
+
+    def obter_anexos_do_followup(self, id_followup: int, tamanho_maximo_mb: int) -> tuple[list[Anexo], list[str]]:
+        """
+        Busca os documentos anexados especificamente a um followup (ITILFollowup),
+        não ao chamado. Um documento anexado via followup NUNCA aparece em
+        /Ticket/{id}/Document_Item (confirmado ao vivo: chamado GLPI #34234 /
+        Tiflux #362601 — o anexo da planilha corrigida, mandado num followup do
+        requerente, só existe em /ITILFollowup/{id}/Document_Item, com
+        tickets_id=0 no próprio Document). Sem isso, o anexo de um followup
+        feito depois da criação do ticket no Tiflux é descartado silenciosamente
+        (obter_anexos() só roda uma vez, na criação do ticket).
+        """
+        return self._obter_anexos_de(
+            f"/ITILFollowup/{id_followup}/Document_Item", tamanho_maximo_mb, "Falha ao listar anexos do followup no GLPI",
+        )
+
+    def _obter_anexos_de(self, caminho: str, tamanho_maximo_mb: int, mensagem_erro: str) -> tuple[list[Anexo], list[str]]:
+        resp = self._get(caminho)
         if resp.status_code not in (200, 206):
-            return [], [f"Falha ao listar anexos do chamado no GLPI (status {resp.status_code})"]
+            return [], [f"{mensagem_erro} (status {resp.status_code})"]
 
         vinculos = resp.json()
         if not isinstance(vinculos, list) or not vinculos:

@@ -11,6 +11,16 @@ from sync.config import Config, log
 from sync.glpi_client import TIMEOUT_PADRAO_SEGUNDOS, Anexo
 
 
+def _campos_anexos(anexos: list[Anexo] | None) -> list[tuple]:
+    """
+    Monta os campos multipart "files[]" pra anexar junto de uma resposta
+    (POST .../answers ou .../client-answers) — precisa ser lista de tuplas,
+    não dict, porque a API espera a MESMA chave "files[]" repetida uma vez
+    por arquivo, e um dict não guarda chaves duplicadas.
+    """
+    return [("files[]", (nome, conteudo, mime)) for nome, conteudo, mime in (anexos or [])]
+
+
 class TifluxClient:
     """Wraps chamadas à API do Tiflux. Uma instância por execução do cron."""
 
@@ -283,18 +293,24 @@ class TifluxClient:
             return True, None
         return False, f"Falha ao reabrir ticket no Tiflux ({resp.status_code}): {resp.text}"
 
-    def publicar_resposta_cliente(self, ticket_number: str, conteudo: str, nome_requerente: str) -> requests.Response:
+    def publicar_resposta_cliente(
+        self, ticket_number: str, conteudo: str, nome_requerente: str, anexos: list[Anexo] | None = None,
+    ) -> requests.Response:
+        campos = [("name", (None, conteudo)), ("author_name", (None, nome_requerente))]
         return self._session.post(
             f"{self._url_base}/tickets/{ticket_number}/client-answers",
-            files={"name": (None, conteudo), "author_name": (None, nome_requerente)},
+            files=campos + _campos_anexos(anexos),
             headers=self._headers_get,
             timeout=self._timeout,
         )
 
-    def publicar_resposta_agente(self, ticket_number: str, conteudo: str) -> requests.Response:
+    def publicar_resposta_agente(
+        self, ticket_number: str, conteudo: str, anexos: list[Anexo] | None = None,
+    ) -> requests.Response:
+        campos = [("name", (None, conteudo))]
         return self._session.post(
             f"{self._url_base}/tickets/{ticket_number}/answers",
-            files={"name": (None, conteudo)},
+            files=campos + _campos_anexos(anexos),
             headers=self._headers_get,
             timeout=self._timeout,
         )
