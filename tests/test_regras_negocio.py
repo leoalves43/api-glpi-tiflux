@@ -2,7 +2,6 @@ import unittest
 
 from sync.config import Config
 from sync.regras_negocio import (
-    autor_e_solicitante,
     definir_autor_glpi,
     definir_prioridade,
     definir_tecnico,
@@ -79,17 +78,6 @@ class TestTextoPrioridadeGlpi(unittest.TestCase):
     def test_valor_desconhecido_cai_em_normal(self):
         self.assertEqual(texto_prioridade_glpi(99), "Normal")
         self.assertEqual(texto_prioridade_glpi(None), "Normal")
-
-
-class TestAutorESolicitante(unittest.TestCase):
-    def test_ids_iguais_e_nao_nulos(self):
-        self.assertTrue(autor_e_solicitante(42, 42))
-
-    def test_ids_diferentes(self):
-        self.assertFalse(autor_e_solicitante(1, 2))
-
-    def test_requerente_desconhecido_nunca_bate(self):
-        self.assertFalse(autor_e_solicitante(42, None))
 
 
 if __name__ == "__main__":

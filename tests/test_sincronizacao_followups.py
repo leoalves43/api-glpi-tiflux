@@ -65,21 +65,23 @@ class TestSincronizarFollowupsGlpiParaTiflux(unittest.TestCase):
         self.assertEqual((sucesso, erro), (0, 0))
         self.assertEqual(self.tiflux.publicacoes, [])
 
-    def test_followup_publico_do_requerente_vai_para_client_answer(self):
+    def test_followup_publico_do_requerente_vai_com_nome_dele(self):
         self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]
-        self.glpi.tickets[1] = {}
-        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 5)
+        self.glpi.nomes_usuarios[5] = "Fulano"
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (1, 0))
         self.assertEqual(self.tiflux.publicacoes[0][0], "cliente")
+        self.assertEqual(self.tiflux.publicacoes[0][3], "Fulano")
 
-    def test_followup_publico_de_outro_autor_vai_para_answer_de_agente(self):
-        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 99}]
-        self.glpi.tickets[1] = {}
-        self.glpi.requerentes[1] = ("Fulano", "f@x.com", 5)
+    def test_followup_publico_de_quem_nao_e_requerente_vai_com_nome_do_autor(self):
+        # GLPI #34522: followup do Marcio (não requerente) chegava no Tiflux
+        # como resposta de agente, assinada "API Embras" (dono do token).
+        self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 780}]
+        self.glpi.nomes_usuarios[780] = "Marcio Silva"
         sucesso, erro = sincronizar_followups_glpi_para_tiflux(self.conn, _CONFIG, self.glpi, self.tiflux, 1, "T-1")
         self.assertEqual((sucesso, erro), (1, 0))
-        self.assertEqual(self.tiflux.publicacoes[0][0], "agente")
+        self.assertEqual(self.tiflux.publicacoes[0][0], "cliente")
+        self.assertEqual(self.tiflux.publicacoes[0][3], "Marcio Silva")
 
     def test_falha_http_ao_publicar_conta_como_erro(self):
         self.glpi.followups[1] = [{"id": 10, "content": "oi", "is_private": 0, "users_id": 5}]

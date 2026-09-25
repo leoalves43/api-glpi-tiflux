@@ -370,6 +370,25 @@ class TestObterRequerente(unittest.TestCase):
         self.assertEqual((nome, email, id_req), ("Desconhecido", None, None))
 
 
+class TestObterNomeUsuario(unittest.TestCase):
+    def test_monta_nome_completo(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/User/780", FakeResponse(200, {"firstname": "Marcio", "realname": "Silva"}))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertEqual(_client(fake).obter_nome_usuario(780), "Marcio Silva")
+
+    def test_falha_http_retorna_desconhecido(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/User/780", FakeResponse(404, {}))
+        with patch("sync.glpi_client.requests", fake):
+            self.assertEqual(_client(fake).obter_nome_usuario(780), "Desconhecido")
+
+    def test_sem_id_nao_chama_api(self):
+        fake = FakeRequests()
+        with patch("sync.glpi_client.requests", fake):
+            self.assertEqual(_client(fake).obter_nome_usuario(None), "Desconhecido")
+
+
 class TestObterAnexos(unittest.TestCase):
     def test_anexo_dentro_do_limite_e_incluido(self):
         fake = FakeRequests()

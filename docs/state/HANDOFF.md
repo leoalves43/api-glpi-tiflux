@@ -5,11 +5,15 @@ DONE (2026-09-25):
   row (status='aberto') on every scan, so the 50-per-run rotation actually
   cycles through all tickets. Root cause of GLPI #34522 (Marcio's followup
   76873, not the requester) never reaching Tiflux — author filter was fine.
-  219 tests passing. See decisions/LOG.md 2026-09-25.
+  See decisions/LOG.md 2026-09-25.
+- Every public GLPI followup now goes to Tiflux as a client-answer signed with
+  the GLPI author's name, instead of an agent answer signed "API Embras".
+  217 tests passing.
 
 NEXT:
-1. Confirm GLPI followup 76873 (#34522) lands on Tiflux #363403 as an agent
-   answer within ~3 cron runs (139 tickets / 50 per run).
+1. Next GLPI followup from a non-requester: confirm Tiflux shows the author's
+   name. 76873 (#34522) already went out as "API Embras" (Tiflux answer
+   31745908) before this change and was NOT republished.
 2. Watch the next GLPI followup with an attachment — confirm it lands as a
    file on the Tiflux answer, not the ticket (from 2026-09-21, still unverified).
 3. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.

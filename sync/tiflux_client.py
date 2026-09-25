@@ -304,17 +304,6 @@ class TifluxClient:
             timeout=self._timeout,
         )
 
-    def publicar_resposta_agente(
-        self, ticket_number: str, conteudo: str, anexos: list[Anexo] | None = None,
-    ) -> requests.Response:
-        campos = [("name", (None, conteudo))]
-        return self._session.post(
-            f"{self._url_base}/tickets/{ticket_number}/answers",
-            files=campos + _campos_anexos(anexos),
-            headers=self._headers_get,
-            timeout=self._timeout,
-        )
-
     def publicar_comunicacao_interna(self, ticket_number: str, conteudo: str) -> requests.Response:
         return self._session.post(
             f"{self._url_base}/tickets/{ticket_number}/internal_communications",

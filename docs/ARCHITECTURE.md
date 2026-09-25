@@ -29,7 +29,7 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
    `sincronizar_followups()` (sync/sincronizacao_followups.py) rotates through a
    batch of `status='sucesso'` tickets, skips closed ones, and calls:
    - `sincronizar_followups_glpi_para_tiflux()` — GLPI `ITILFollowup` ->
-     Tiflux `/answers`, `/client-answers`, or `/internal_communications`.
+     Tiflux `/client-answers`, always with the GLPI author's name (public only).
    - `sincronizar_followups_tiflux_para_glpi()` — Tiflux answers/internal
      communications -> GLPI `ITILFollowup`.
    Cascade status sync is otherwise Tiflux -> GLPI only, with one exception:

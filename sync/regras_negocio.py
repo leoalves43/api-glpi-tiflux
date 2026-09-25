@@ -62,8 +62,3 @@ def definir_prioridade(id_mesa: int) -> int | None:
 
 def texto_prioridade_glpi(prioridade_glpi: int | None) -> str:
     return MAPA_PRIORIDADES_GLPI.get(prioridade_glpi, "Normal")
-
-
-def autor_e_solicitante(id_autor_followup: int | None, id_requerente_ticket: int | None) -> bool:
-    """Compara o autor de um followup do GLPI ao requerente do chamado (já resolvido por GlpiClient.obter_requerente)."""
-    return id_requerente_ticket is not None and id_autor_followup == id_requerente_ticket

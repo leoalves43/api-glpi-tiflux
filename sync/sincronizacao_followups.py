@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from sync import db_followups
 from sync.config import Config, log
 from sync.glpi_client import GlpiClient
-from sync.regras_negocio import autor_e_solicitante, definir_autor_glpi
+from sync.regras_negocio import definir_autor_glpi
 from sync.tiflux_client import TifluxClient
 
 # Status de chamado no GLPI considerados "aberto" (Novo/Processando/Pendente)
@@ -255,13 +255,9 @@ def sincronizar_followups_glpi_para_tiflux(
     if not pendentes:
         return 0, 0
 
-    nome_requerente, id_requerente_ticket = _resolver_requerente(glpi, id_chamado)
-
     qtd_sucesso = qtd_erro = 0
     for followup in pendentes:
-        sucesso = _publicar_followup_no_tiflux(
-            conn, config, glpi, tiflux, id_chamado, numero_tiflux, followup, nome_requerente, id_requerente_ticket,
-        )
+        sucesso = _publicar_followup_no_tiflux(conn, config, glpi, tiflux, id_chamado, numero_tiflux, followup)
         qtd_sucesso, qtd_erro = _acumular(sucesso, qtd_sucesso, qtd_erro)
 
     return qtd_sucesso, qtd_erro
@@ -292,12 +288,6 @@ def _followups_glpi_pendentes(conn, config: Config, glpi: GlpiClient, id_chamado
     ]
 
 
-def _resolver_requerente(glpi: GlpiClient, id_chamado: int) -> tuple[str, int | None]:
-    ticket, _ = glpi.obter_ticket(id_chamado)
-    nome_requerente, _, id_requerente_ticket = glpi.obter_requerente(id_chamado, ticket or {})
-    return nome_requerente, id_requerente_ticket
-
-
 # Limite de arquivos por requisição de resposta no Tiflux (POST .../answers e
 # .../client-answers) — ver openapi-spec-tiflux.json. Followup do GLPI com
 # mais anexos que isso manda o excedente pro nível do chamado (ver
@@ -305,10 +295,7 @@ def _resolver_requerente(glpi: GlpiClient, id_chamado: int) -> tuple[str, int | 
 _MAX_ANEXOS_POR_RESPOSTA_TIFLUX = 10
 
 
-def _publicar_followup_no_tiflux(
-    conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_chamado, numero_tiflux, followup,
-    nome_requerente, id_requerente_ticket,
-) -> bool:
+def _publicar_followup_no_tiflux(conn, config, glpi: GlpiClient, tiflux: TifluxClient, id_chamado, numero_tiflux, followup) -> bool:
     id_origem = followup.get("id")
     # Alguns followups do GLPI vêm com o conteúdo HTML-entity-encoded
     # (ex.: "&#60;p&#62;texto&#60;/p&#62;" em vez de "<p>texto</p>"),
@@ -319,10 +306,13 @@ def _publicar_followup_no_tiflux(
     anexos_na_resposta = anexos[:_MAX_ANEXOS_POR_RESPOSTA_TIFLUX]
     anexos_excedentes = anexos[_MAX_ANEXOS_POR_RESPOSTA_TIFLUX:]
 
-    tipo, resp = _enviar_followup_para_tiflux(
-        tiflux, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket, anexos_na_resposta,
-    )
-    sucesso = _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tipo, id_origem, resp, avisos_anexos)
+    # Sempre client-answers com o nome real do autor no GLPI (requerente ou
+    # não): /answers não aceita autor e aparece como o dono do token da API
+    # ("API Embras") — pedido do usuário após o followup de terceiro do
+    # GLPI #34522 chegar assim no Tiflux.
+    nome_autor = glpi.obter_nome_usuario(followup.get("users_id"))
+    resp = tiflux.publicar_resposta_cliente(numero_tiflux, conteudo, nome_autor, anexos_na_resposta)
+    sucesso = _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, "publica", id_origem, resp, avisos_anexos)
     if sucesso and anexos_excedentes:
         _enviar_anexos_excedentes(tiflux, numero_tiflux, id_origem, anexos_excedentes)
     return sucesso
@@ -334,16 +324,6 @@ def _enviar_anexos_excedentes(tiflux: TifluxClient, numero_tiflux, id_origem, an
     if falhados:
         log(f"⚠️ Followup GLPI #{id_origem}: {falhados} anexo(s) excedente(s) (>10) falharam ao enviar pro "
             f"Tiflux #{numero_tiflux}: {'; '.join(motivos)}")
-
-
-def _enviar_followup_para_tiflux(
-    tiflux: TifluxClient, numero_tiflux, followup, conteudo, nome_requerente, id_requerente_ticket, anexos: list,
-):
-    id_autor = followup.get("users_id")
-
-    if autor_e_solicitante(id_autor, id_requerente_ticket):
-        return "publica", tiflux.publicar_resposta_cliente(numero_tiflux, conteudo, nome_requerente, anexos)
-    return "publica", tiflux.publicar_resposta_agente(numero_tiflux, conteudo, anexos)
 
 
 def _registrar_publicacao_no_tiflux(conn, config, id_chamado, numero_tiflux, tipo, id_origem, resp, avisos_anexos: list) -> bool:

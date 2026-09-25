@@ -10,6 +10,7 @@ class FakeGlpiClient:
         self.grupo_observador: dict[int, tuple[bool, str | None]] = {}
         self.followups: dict[int, list[dict]] = {}
         self.requerentes: dict[int, tuple[str, str | None, int | None]] = {}
+        self.nomes_usuarios: dict[int, str] = {}
         self.anexos: dict[int, tuple[list, list]] = {}
         self.anexos_followup: dict[int, tuple[list, list]] = {}
         self.followups_criados: list[dict] = []
@@ -39,6 +40,9 @@ class FakeGlpiClient:
 
     def obter_requerente(self, id_chamado, ticket):
         return self.requerentes.get(id_chamado, ("Desconhecido", None, None))
+
+    def obter_nome_usuario(self, id_usuario):
+        return self.nomes_usuarios.get(id_usuario, "Desconhecido")
 
     def obter_anexos(self, id_chamado, tamanho_maximo_mb):
         return self.anexos.get(id_chamado, ([], []))
@@ -137,10 +141,6 @@ class FakeTifluxClient:
 
     def publicar_resposta_cliente(self, ticket_number, conteudo, nome_requerente, anexos=None):
         self.publicacoes.append(("cliente", ticket_number, conteudo, nome_requerente, anexos or []))
-        return self.resposta_publicacao
-
-    def publicar_resposta_agente(self, ticket_number, conteudo, anexos=None):
-        self.publicacoes.append(("agente", ticket_number, conteudo, anexos or []))
         return self.resposta_publicacao
 
     def reabrir_ticket(self, ticket_number, motivo_reprovacao):

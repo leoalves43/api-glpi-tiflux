@@ -321,6 +321,19 @@ class GlpiClient:
                     return v.get("users_id")
         return ticket.get("users_id_recipient") or ticket.get("users_id_lastupdater")
 
+    def obter_nome_usuario(self, id_usuario: int | None) -> str:
+        """
+        Nome de exibição (firstname + realname) de um usuário do GLPI, ou
+        "Desconhecido" se não der pra buscar.
+        Ex.: glpi.obter_nome_usuario(780) -> "Marcio Silva"
+        """
+        if not id_usuario:
+            return "Desconhecido"
+        resp_usuario = self._get(f"/User/{id_usuario}")
+        if resp_usuario.status_code not in (200, 206):
+            return "Desconhecido"
+        return _formatar_nome_usuario(resp_usuario.json())
+
     def _dados_usuario(self, id_usuario: int) -> tuple[str, str | None]:
         nome = "Desconhecido"
         email = None
@@ -328,10 +341,7 @@ class GlpiClient:
         resp_usuario = self._get(f"/User/{id_usuario}")
         if resp_usuario.status_code in (200, 206):
             dados = resp_usuario.json()
-            p_nome = dados.get("firstname", "")
-            s_nome = dados.get("realname", "")
-            login = dados.get("name", "")
-            nome = f"{p_nome} {s_nome}".strip() if (p_nome or s_nome) else f"Login: {login}"
+            nome = _formatar_nome_usuario(dados)
             email = dados.get("email")
 
         if not email:
@@ -433,3 +443,11 @@ class GlpiClient:
             return
 
         anexos.append((nome_arquivo, resp_bin.content, mime))
+
+
+def _formatar_nome_usuario(dados_usuario: dict) -> str:
+    """firstname + realname do /User do GLPI; sem nenhum dos dois, cai pro login."""
+    p_nome = dados_usuario.get("firstname", "")
+    s_nome = dados_usuario.get("realname", "")
+    login = dados_usuario.get("name", "")
+    return f"{p_nome} {s_nome}".strip() if (p_nome or s_nome) else f"Login: {login}"

@@ -235,25 +235,6 @@ class TestEnviarAnexos(unittest.TestCase):
 
 
 class TestPublicarRespostaComAnexos(unittest.TestCase):
-    def test_resposta_agente_sem_anexos_nao_manda_files(self):
-        fake = FakeRequests()
-        fake.programar("POST", "/answers", FakeResponse(201, {"id": 1}))
-        with patch("sync.tiflux_client.requests", fake):
-            _client().publicar_resposta_agente("T-1", "oi")
-        _, _, kwargs = fake.chamadas[0]
-        self.assertEqual(kwargs["files"], [("name", (None, "oi"))])
-
-    def test_resposta_agente_com_anexos_manda_files_repetido(self):
-        fake = FakeRequests()
-        fake.programar("POST", "/answers", FakeResponse(201, {"id": 1}))
-        anexos = [("a.txt", b"1", "text/plain"), ("b.txt", b"2", "text/plain")]
-        with patch("sync.tiflux_client.requests", fake):
-            _client().publicar_resposta_agente("T-1", "oi", anexos)
-        _, _, kwargs = fake.chamadas[0]
-        self.assertEqual(kwargs["files"], [
-            ("name", (None, "oi")), ("files[]", anexos[0]), ("files[]", anexos[1]),
-        ])
-
     def test_resposta_cliente_com_anexos_manda_author_name_e_files(self):
         fake = FakeRequests()
         fake.programar("POST", "/client-answers", FakeResponse(201, {"id": 1}))
