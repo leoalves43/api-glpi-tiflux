@@ -183,8 +183,15 @@ def _mensagem_encerramento_sem_resposta(ticket_tiflux: dict) -> str:
 
 
 def _ultima_resposta_publica_tiflux(tiflux: TifluxClient, numero_tiflux: str, config: Config, ticket_tiflux: dict) -> str:
-    """A resposta pública (/answers) mais recente do ticket no Tiflux, por answer_time, vira o conteúdo da solução no GLPI (prefixada com autor+data, mesmo padrão dos followups)."""
-    respostas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
+    """
+    A resposta pública (/answers) mais recente escrita por um técnico no
+    Tiflux, por answer_time, vira o conteúdo da solução no GLPI (prefixada
+    com autor+data, mesmo padrão dos followups). Respostas criadas pela
+    própria integração (followups vindos do GLPI) ficam de fora — GLPI #34522
+    fechou com o followup do Marcio como solução em vez da resposta do técnico.
+    """
+    todas = tiflux.listar_respostas(numero_tiflux, config.tamanho_pagina_respostas_tiflux, config.max_paginas_respostas_tiflux)
+    respostas = [r for r in todas if not _resposta_criada_pela_integracao(r)]
     if not respostas:
         return _mensagem_encerramento_sem_resposta(ticket_tiflux)
     mais_recente = max(respostas, key=lambda r: r.get("answer_time") or "")
@@ -401,6 +408,11 @@ def _publicar_respostas_publicas(conn, config, glpi: GlpiClient, id_chamado, num
 def _deve_ignorar_resposta_publica(resposta: dict, ja_processados_ou_proprios: set[int]) -> bool:
     if resposta.get("id") in ja_processados_ou_proprios:
         return True
+    return _resposta_criada_pela_integracao(resposta)
+
+
+def _resposta_criada_pela_integracao(resposta: dict) -> bool:
+    """Resposta do Tiflux criada via API (followup vindo do GLPI), não por um técnico — o Tiflux marca answer_origin='api' e prefixa o autor com "[API]"."""
     return resposta.get("answer_origin") == "api" or str(resposta.get("author", "")).startswith("[API]")
 
 

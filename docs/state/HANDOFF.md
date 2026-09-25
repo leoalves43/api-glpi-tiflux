@@ -8,7 +8,9 @@ DONE (2026-09-25):
   See decisions/LOG.md 2026-09-25.
 - Every public GLPI followup now goes to Tiflux as a client-answer signed with
   the GLPI author's name, instead of an agent answer signed "API Embras".
-  217 tests passing.
+- Cascade-close solution now uses the latest TECHNICIAN answer in Tiflux,
+  skipping answers the integration itself posted (GLPI followups). 219 tests.
+  GLPI #34522's existing solution (ITILSolution 34714) is still the wrong one.
 
 NEXT:
 1. Next GLPI followup from a non-requester: confirm Tiflux shows the author's

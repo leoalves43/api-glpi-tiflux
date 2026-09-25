@@ -329,6 +329,27 @@ class TestPreparacaoEncerramentoCascata(unittest.TestCase):
         self.assertIn("<strong>José Augusto</strong> (05/09/2026 07:00)", conteudo)
         self.assertIn("resposta mais recente", conteudo)
 
+    def test_solucao_ignora_resposta_criada_pela_integracao_mesmo_mais_recente(self):
+        # GLPI #34522: followup do Marcio (vindo do GLPI via API) era a
+        # resposta mais recente e virou a solução, no lugar da do técnico.
+        self.tiflux.respostas = [
+            {"id": 1, "name": "resposta do tecnico", "answer_time": "2026-09-25T19:41:50Z",
+             "author": "Leonardo", "answer_origin": "tiflux_web"},
+            {"id": 2, "name": "followup vindo do GLPI", "answer_time": "2026-09-25T19:59:20Z",
+             "author": "[API] MARCIO", "answer_origin": "api"},
+        ]
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        conteudo = self.glpi.solucoes_registradas[0][1]
+        self.assertIn("resposta do tecnico", conteudo)
+        self.assertNotIn("followup vindo do GLPI", conteudo)
+
+    def test_so_respostas_da_integracao_usa_texto_padrao(self):
+        self.tiflux.respostas = [{"id": 2, "name": "eco", "answer_time": "2026-09-25T19:59:20Z", "author": "[API] X"}]
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
+        self.assertNotIn("eco", self.glpi.solucoes_registradas[0][1])
+
     def test_sem_resposta_publica_usa_texto_padrao(self):
         conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
         sincronizar_followups(conn, _CONFIG, self.glpi, self.tiflux)
