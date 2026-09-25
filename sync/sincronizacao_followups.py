@@ -105,6 +105,8 @@ def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tifl
     totais["t2g_sucesso"] += s
     totais["t2g_erro"] += e
 
+    db_followups.registrar_chamado_aberto_varrido(conn, config, id_glpi, numero_tiflux)
+
     if ticket_tiflux and ticket_tiflux.get("is_closed"):
         _encerrar_em_cascata(conn, config, glpi, tiflux, id_glpi, numero_tiflux, ticket_tiflux, totais)
 

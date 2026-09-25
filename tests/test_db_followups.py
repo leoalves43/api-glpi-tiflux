@@ -95,5 +95,15 @@ class TestRegistrarChamadoFechadoParaFollowups(unittest.TestCase):
                           (42, None, "verificacao_status", "status", -42, None, "fechado"))
 
 
+
+class TestRegistrarChamadoAbertoVarrido(unittest.TestCase):
+    def test_usa_mesma_linha_sentinela_do_chamado_fechado_com_status_aberto(self):
+        conn = FakeConnection()
+        db_followups.registrar_chamado_aberto_varrido(conn, _CONFIG, 42, 363403)
+        _, params = conn.execucoes[0]
+        id_glpi, numero_tiflux, direcao, tipo, id_origem, id_destino, status, _mensagem = params
+        self.assertEqual((id_glpi, numero_tiflux, direcao, tipo, id_origem, id_destino, status),
+                          (42, 363403, "verificacao_status", "status", -42, None, "aberto"))
+
 if __name__ == "__main__":
     unittest.main()

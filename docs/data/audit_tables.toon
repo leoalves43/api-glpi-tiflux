@@ -16,7 +16,7 @@ api_glpi_tiflux_followups[12]{column,type,nullable,default,note}:
   tipo,VARCHAR(20),false,-,publica|interna|status
   id_origem,INTEGER,false,-,part of unique conflict key (direcao,id_origem); negative -id_glpi sentinel for verificacao_status rows
   id_destino,INTEGER,true,-,set only on success; null on error
-  status,VARCHAR(20),false,-,sucesso|erro|fechado
+  status,VARCHAR(20),false,-,sucesso|erro|fechado|aberto (last two: verificacao_status scan marker)
   mensagem,TEXT,true,-,-
   tentativas,INTEGER,false,1,incremented on ON CONFLICT UPDATE
   criado_em,TIMESTAMP,false,now(),-

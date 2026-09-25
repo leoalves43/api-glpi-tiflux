@@ -224,6 +224,18 @@ class TestSincronizarFollowups(unittest.TestCase):
         self.assertIn("verificacao_status", params)
         self.assertEqual(glpi.chamados_encerrados, [])
 
+    def test_chamado_aberto_sem_followup_novo_e_marcado_como_varrido(self):
+        # Regressão GLPI #34522: sem essa marca o rodízio (ORDER BY última
+        # varredura) nunca mais voltava a um chamado recém-sincronizado.
+        glpi = FakeGlpiClient()
+        tiflux = FakeTifluxClient()
+        glpi.tickets[1] = {"status": 1}
+        tiflux.ticket_tiflux = {"is_closed": False, "desk": {"id": 37964}}
+        conn = FakeConnection(respostas=[[(1, "T-1")], [], []])
+        sincronizar_followups(conn, _CONFIG, glpi, tiflux)
+        _, params = conn.execucoes[-1]
+        self.assertEqual(params[2:7], ("verificacao_status", "status", -1, None, "aberto"))
+
     def test_chamado_sem_numero_tiflux_e_ignorado(self):
         glpi = FakeGlpiClient()
         tiflux = FakeTifluxClient()

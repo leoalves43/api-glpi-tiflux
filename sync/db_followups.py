@@ -133,7 +133,29 @@ def registrar_chamado_fechado_para_followups(conn, config: Config, id_glpi: int)
     rodízio de obter_chamados_para_varrer_followups (que ordena por última
     varredura), monopolizando o limite de chamados verificados por execução.
     """
+    _registrar_verificacao_status(
+        conn, config, id_glpi, None, "fechado", "Chamado fechado no GLPI — fora do escopo da varredura de followups",
+    )
+
+
+def registrar_chamado_aberto_varrido(conn, config: Config, id_glpi: int, numero_tiflux) -> None:
+    """
+    Marca que os followups deste chamado aberto acabaram de ser varridos,
+    mesmo sem nenhum followup novo. O rodízio de
+    obter_chamados_para_varrer_followups ordena por MAX(atualizado_em) — sem
+    essa marca, um chamado sem atividade nova ficava com timestamp velho e
+    sempre na frente da fila, e um chamado recém-sincronizado ia pro fim e
+    nunca mais era varrido (GLPI #34522: followup de terceiro nunca chegou
+    ao Tiflux porque o chamado saiu do limite de 50 por execução).
+    Ex.: registrar_chamado_aberto_varrido(conn, config, 34522, 363403)
+    """
+    _registrar_verificacao_status(
+        conn, config, id_glpi, numero_tiflux, "aberto", "Chamado aberto no GLPI — followups varridos",
+    )
+
+
+def _registrar_verificacao_status(conn, config: Config, id_glpi: int, numero_tiflux, status: str, mensagem: str) -> None:
+    """Linha única por chamado (direcao='verificacao_status', id_origem=-id_glpi); o upsert atualiza atualizado_em a cada varredura."""
     registrar_resultado_followup(
-        conn, config, id_glpi, None, "verificacao_status", "status", -id_glpi, None,
-        "fechado", "Chamado fechado no GLPI — fora do escopo da varredura de followups",
+        conn, config, id_glpi, numero_tiflux, "verificacao_status", "status", -id_glpi, None, status, mensagem,
     )
