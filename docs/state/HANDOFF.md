@@ -5,16 +5,14 @@ DONE (2026-09-29):
   (`regras_negocio.cabecalho_prioridade_glpi`), sent as HTML with <br><br>
   between priority / solicitante / descrição. GLPI entity-encoded `content`
   now decoded before tag stripping. 225 tests. See decisions/LOG.md 2026-09-29.
+  Test tickets (GLPI #34640-34644 / Tiflux #363733-363738) closed both sides.
 
 NEXT:
-1. Test tickets: GLPI #34640/#34641/#34643/#34644 already closed. Tiflux
-   #363733/#363734/#363735/#363738 sit in "Em Atendimento - Residentes" —
-   user closes + logs appointments by hand (API token = API Embras user).
-2. Next GLPI followup from a non-requester: confirm Tiflux shows author's name.
-3. Watch next GLPI followup with attachment — lands on the answer, not ticket.
-4. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.
-5. Followups loop needs connection-per-thread/locking before parallelizing.
-6. 8 duplicate Tiflux tickets from 2026-09-14 still need manual close/merge.
+1. Next GLPI followup from a non-requester: confirm Tiflux shows author's name.
+2. Watch next GLPI followup with attachment — lands on the answer, not ticket.
+3. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.
+4. Followups loop needs connection-per-thread/locking before parallelizing.
+5. 8 duplicate Tiflux tickets from 2026-09-14 still need manual close/merge.
 
 RISKS:
 - Scheduled Task `GLPI-Tiflux-Sync` runs this working dir every 5 min —
