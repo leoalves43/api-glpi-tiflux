@@ -7,8 +7,9 @@ DONE (2026-09-29):
   now decoded before tag stripping. 225 tests. See decisions/LOG.md 2026-09-29.
 
 NEXT:
-1. Close test tickets by hand: GLPI #34640/#34641/#34643/#34644 ->
-   Tiflux #363733/#363734/#363735/#363738.
+1. Test tickets: GLPI #34640/#34641/#34643/#34644 already closed. Tiflux
+   #363733/#363734/#363735/#363738 sit in "Em Atendimento - Residentes" —
+   user closes + logs appointments by hand (API token = API Embras user).
 2. Next GLPI followup from a non-requester: confirm Tiflux shows author's name.
 3. Watch next GLPI followup with attachment — lands on the answer, not ticket.
 4. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.
