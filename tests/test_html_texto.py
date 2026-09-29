@@ -28,6 +28,11 @@ class TestHtmlParaTextoPlano(unittest.TestCase):
         resultado = html_para_texto_plano("<p>&lt;tag&gt; &amp; texto</p>")
         self.assertEqual(resultado, "<tag> & texto")
 
+    def test_html_codificado_pelo_glpi_tem_tags_removidas(self):
+        # Formato real de `content` na API do GLPI (chamado #34522).
+        resultado = html_para_texto_plano("&#60;p&#62;Primeiro&#60;/p&#62;\n&#60;p&#62;Segundo&#60;/p&#62;")
+        self.assertEqual(resultado, "Primeiro\n\nSegundo")
+
 
 if __name__ == "__main__":
     unittest.main()

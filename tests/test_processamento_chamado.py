@@ -4,7 +4,7 @@ from unittest.mock import patch
 import requests
 
 from sync.config import Config
-from sync.processamento_chamado import processar_chamado
+from sync.processamento_chamado import processar_chamado, texto_para_html_tiflux
 from tests.fake_clients import FakeGlpiClient, FakeTifluxClient
 
 _CONFIG = Config(
@@ -89,6 +89,14 @@ class TestProcessarChamado(unittest.TestCase):
         form_data = self.tiflux.tickets_criados[0]
         self.assertEqual(form_data["entities[][entity_field_id]"], str(_CONFIG.id_campo_modulo_utilizado_tiflux))
         self.assertEqual(form_data["entities[][value]"], str(_CONFIG.id_opcao_modulo_utilizado_padrao_tiflux))
+
+    def test_descricao_separa_prioridade_solicitante_e_descricao_com_duas_quebras(self):
+        self.glpi.tickets[1] = _TICKET_ARRECADACAO
+        processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
+        descricao = self.tiflux.tickets_criados[0]["description"]
+        self.assertNotIn("\n", descricao)
+        self.assertIn("solução de contorno.<br><br>Solicitante:", descricao)
+        self.assertIn("&gt;<br><br>Descrição:<br>desc", descricao)
 
     def test_sucesso_volta_status_para_novo_no_glpi_apos_atribuir_tecnico(self):
         """
@@ -190,6 +198,14 @@ class TestProcessarChamado(unittest.TestCase):
             status, numero, msg = processar_chamado(self.glpi, self.tiflux, _CONFIG, 1)
         self.assertEqual((status, numero), ("erro", None))
         self.assertIn("Erro inesperado", msg)
+
+
+class TestTextoParaHtmlTiflux(unittest.TestCase):
+    def test_quebra_de_linha_vira_br(self):
+        self.assertEqual(texto_para_html_tiflux("a\n\nb"), "a<br><br>b")
+
+    def test_escapa_sinais_de_menor_e_maior(self):
+        self.assertEqual(texto_para_html_tiflux("Fulano <f@x.com>"), "Fulano &lt;f@x.com&gt;")
 
 
 if __name__ == "__main__":

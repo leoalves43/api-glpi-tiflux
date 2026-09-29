@@ -1,26 +1,19 @@
 # Handoff
 
-DONE (2026-09-25):
-- Fixed followup scan rotation: open tickets now get a `verificacao_status`
-  row (status='aberto') on every scan, so the 50-per-run rotation actually
-  cycles through all tickets. Root cause of GLPI #34522 (Marcio's followup
-  76873, not the requester) never reaching Tiflux — author filter was fine.
-  See decisions/LOG.md 2026-09-25.
-- Every public GLPI followup now goes to Tiflux as a client-answer signed with
-  the GLPI author's name, instead of an agent answer signed "API Embras".
-- Cascade-close solution now uses the latest TECHNICIAN answer in Tiflux,
-  skipping answers the integration itself posted (GLPI followups). 219 tests.
-  GLPI #34522's existing solution (ITILSolution 34714) is still the wrong one.
+DONE (2026-09-29):
+- Tiflux description header now shows GLPI priority name + contract SLA text
+  (`regras_negocio.cabecalho_prioridade_glpi`), sent as HTML with <br><br>
+  between priority / solicitante / descrição. GLPI entity-encoded `content`
+  now decoded before tag stripping. 225 tests. See decisions/LOG.md 2026-09-29.
 
 NEXT:
-1. Next GLPI followup from a non-requester: confirm Tiflux shows the author's
-   name. 76873 (#34522) already went out as "API Embras" (Tiflux answer
-   31745908) before this change and was NOT republished.
-2. Watch the next GLPI followup with an attachment — confirm it lands as a
-   file on the Tiflux answer, not the ticket (from 2026-09-21, still unverified).
-3. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.
-4. Followups loop needs connection-per-thread/locking before parallelizing.
-5. 8 duplicate Tiflux tickets from 2026-09-14 still need manual close/merge.
+1. Close test tickets by hand: GLPI #34640/#34641/#34643/#34644 ->
+   Tiflux #363733/#363734/#363735/#363738.
+2. Next GLPI followup from a non-requester: confirm Tiflux shows author's name.
+3. Watch next GLPI followup with attachment — lands on the answer, not ticket.
+4. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.
+5. Followups loop needs connection-per-thread/locking before parallelizing.
+6. 8 duplicate Tiflux tickets from 2026-09-14 still need manual close/merge.
 
 RISKS:
 - Scheduled Task `GLPI-Tiflux-Sync` runs this working dir every 5 min —

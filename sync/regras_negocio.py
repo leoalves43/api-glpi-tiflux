@@ -11,7 +11,37 @@ PRIORIDADE_POR_MESA = {
     37966: 121197,  # SUPRIMENTOS        -> Solicitar um Atendimento
 }
 
-MAPA_PRIORIDADES_GLPI = {1: "Baixa", 2: "Média", 3: "Normal", 4: "Alta", 5: "Urgente"}
+# Textos de SLA do contrato, agrupados em 3 faixas sobre a escala de 6 níveis do GLPI.
+_SLA_PRIORIDADE_BAIXA = (
+    "Tempo para conclusão não é requerido e o trabalho normal pode continuar.\n"
+    "Ação em 72 horas da abertura do chamado e resolução em prazo de comum acordo."
+)
+_SLA_PRIORIDADE_MEDIA = (
+    "Funcionalidade com problema, mas sem comprometer a operação do sistema;\n"
+    "Não há compromisso imediato e inadiável do usuário;\n"
+    "Alguns munícipes precisam ter a solução dos seus interesses adiada.\n\n"
+    "Ação em até 8 horas da abertura do chamado com resolução em 72 horas.\n"
+    "Deverá apresentar solução de contorno."
+)
+_SLA_PRIORIDADE_CRITICA = (
+    "Sistema parado;\n"
+    "Sistema apresenta erro que compromete a observância de prazo inadiável;\n"
+    "Número significativo de munícipes afetado pela paralisação.\n\n"
+    "Ação em até 2 horas da abertura do chamado com resolução em até 24 horas.\n"
+    "Deverá apresentar solução de emergência."
+)
+
+# priority do GLPI -> (nome exibido, texto de SLA)
+NIVEIS_PRIORIDADE_GLPI: dict[int, tuple[str, str]] = {
+    1: ("Muito baixa", _SLA_PRIORIDADE_BAIXA),
+    2: ("Baixa", _SLA_PRIORIDADE_BAIXA),
+    3: ("Média", _SLA_PRIORIDADE_MEDIA),
+    4: ("Alta", _SLA_PRIORIDADE_MEDIA),
+    5: ("Muito alta", _SLA_PRIORIDADE_CRITICA),
+    6: ("Crítica", _SLA_PRIORIDADE_CRITICA),
+}
+# 3 (Média) é o padrão do GLPI — usado quando priority vem vazio ou fora da escala.
+_NIVEL_PRIORIDADE_PADRAO = NIVEIS_PRIORIDADE_GLPI[3]
 
 
 def depara_categoria(cat_id: int | None) -> int | None:
@@ -60,5 +90,10 @@ def definir_prioridade(id_mesa: int) -> int | None:
     return PRIORIDADE_POR_MESA.get(id_mesa)
 
 
-def texto_prioridade_glpi(prioridade_glpi: int | None) -> str:
-    return MAPA_PRIORIDADES_GLPI.get(prioridade_glpi, "Normal")
+def cabecalho_prioridade_glpi(prioridade_glpi: int | None) -> str:
+    """
+    Cabeçalho da descrição no Tiflux: nome da prioridade do GLPI + SLA da faixa.
+    Ex.: cabecalho_prioridade_glpi(6) -> "Este chamado tem a prioridade: Crítica\\n\\nSistema parado;..."
+    """
+    nome, sla = NIVEIS_PRIORIDADE_GLPI.get(prioridade_glpi, _NIVEL_PRIORIDADE_PADRAO)
+    return f"Este chamado tem a prioridade: {nome}\n\n{sla}"

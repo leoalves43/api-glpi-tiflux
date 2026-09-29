@@ -1,16 +1,18 @@
 """Processamento de um único chamado do GLPI: tradução e criação no Tiflux."""
 
+import html
+
 import requests
 
 from sync.config import Config, log
 from sync.glpi_client import GlpiClient
 from sync.html_texto import html_para_texto_plano
 from sync.regras_negocio import (
+    cabecalho_prioridade_glpi,
     definir_autor_glpi,
     definir_prioridade,
     definir_tecnico,
     depara_categoria,
-    texto_prioridade_glpi,
 )
 from sync.tiflux_client import TifluxClient
 
@@ -218,20 +220,29 @@ def _restaurar_status_novo_glpi(glpi: GlpiClient, id_chamado: int, ticket_number
     return " | Aviso: falha ao voltar status para Novo no GLPI"
 
 
+def texto_para_html_tiflux(texto: str) -> str:
+    """
+    O Tiflux renderiza `description` como HTML: \\n colapsa em espaço e `<email>`
+    some como tag desconhecida (visto ao vivo nos tickets de teste 363733/363734).
+    Escapa o texto e troca cada quebra de linha por <br>.
+    Ex.: texto_para_html_tiflux("a <b@c>\\nd") -> "a &lt;b@c&gt;<br>d"
+    """
+    return html.escape(texto, quote=False).replace("\n", "<br>")
+
+
 def _montar_form_data(
     ticket: dict, config: Config, mesa_tiflux: int, id_prioridade_tiflux: int,
     id_solicitante_tiflux: int, nome_solicitante: str, email_solicitante: str | None, id_chamado: int,
 ) -> dict[str, str]:
     titulo_glpi = ticket.get("name")
-    prioridade_glpi_texto = texto_prioridade_glpi(ticket.get("priority"))
 
     titulo_tiflux = f"{titulo_glpi} ({id_chamado})"
-    cabecalho_personalizado = f"Este chamado tem a prioridade: {prioridade_glpi_texto}"
+    cabecalho_personalizado = cabecalho_prioridade_glpi(ticket.get("priority"))
     info_solicitante_texto = f"Solicitante: {nome_solicitante} <{email_solicitante or 'Sem e-mail'}>"
     descricao_glpi_texto = html_para_texto_plano(ticket.get("content"))
-    # Campo de descrição do Tiflux é texto puro (não HTML) — usa \n, não <br>
-    descricao_tiflux = (f"{cabecalho_personalizado}\n\n{info_solicitante_texto}\n\n"
-                         f"Descrição:\n{descricao_glpi_texto}")
+    descricao_texto = (f"{cabecalho_personalizado}\n\n{info_solicitante_texto}\n\n"
+                       f"Descrição:\n{descricao_glpi_texto}")
+    descricao_tiflux = texto_para_html_tiflux(descricao_texto)
 
     return {
         "title": titulo_tiflux,

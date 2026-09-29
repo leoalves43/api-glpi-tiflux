@@ -2,11 +2,11 @@ import unittest
 
 from sync.config import Config
 from sync.regras_negocio import (
+    cabecalho_prioridade_glpi,
     definir_autor_glpi,
     definir_prioridade,
     definir_tecnico,
     depara_categoria,
-    texto_prioridade_glpi,
 )
 
 _CONFIG_TESTE = Config(
@@ -70,14 +70,28 @@ class TestDefinirPrioridade(unittest.TestCase):
         self.assertIsNone(definir_prioridade(99999))
 
 
-class TestTextoPrioridadeGlpi(unittest.TestCase):
-    def test_mapeamento_conhecido(self):
-        self.assertEqual(texto_prioridade_glpi(1), "Baixa")
-        self.assertEqual(texto_prioridade_glpi(5), "Urgente")
+class TestCabecalhoPrioridadeGlpi(unittest.TestCase):
+    def test_muito_baixa_e_baixa_usam_sla_de_72_horas(self):
+        for prioridade, nome in ((1, "Muito baixa"), (2, "Baixa")):
+            cabecalho = cabecalho_prioridade_glpi(prioridade)
+            self.assertTrue(cabecalho.startswith(f"Este chamado tem a prioridade: {nome}\n\n"))
+            self.assertIn("Ação em 72 horas da abertura do chamado", cabecalho)
 
-    def test_valor_desconhecido_cai_em_normal(self):
-        self.assertEqual(texto_prioridade_glpi(99), "Normal")
-        self.assertEqual(texto_prioridade_glpi(None), "Normal")
+    def test_media_e_alta_usam_sla_de_8_horas(self):
+        for prioridade, nome in ((3, "Média"), (4, "Alta")):
+            cabecalho = cabecalho_prioridade_glpi(prioridade)
+            self.assertTrue(cabecalho.startswith(f"Este chamado tem a prioridade: {nome}\n\n"))
+            self.assertIn("Deverá apresentar solução de contorno.", cabecalho)
+
+    def test_muito_alta_e_critica_usam_sla_de_2_horas(self):
+        for prioridade, nome in ((5, "Muito alta"), (6, "Crítica")):
+            cabecalho = cabecalho_prioridade_glpi(prioridade)
+            self.assertTrue(cabecalho.startswith(f"Este chamado tem a prioridade: {nome}\n\n"))
+            self.assertIn("Deverá apresentar solução de emergência.", cabecalho)
+
+    def test_valor_desconhecido_cai_em_media(self):
+        for prioridade in (99, None):
+            self.assertEqual(cabecalho_prioridade_glpi(prioridade), cabecalho_prioridade_glpi(3))
 
 
 if __name__ == "__main__":

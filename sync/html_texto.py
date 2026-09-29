@@ -27,17 +27,29 @@ class _HTMLParaTexto(HTMLParser):
         self.partes.append(data)
 
 
+def _decodificar_html_do_glpi(conteudo_html: str) -> str:
+    """
+    A API do GLPI devolve `content` com o HTML inteiro codificado em entidades
+    ("&#60;p&#62;texto&#60;/p&#62;", visto ao vivo no #34522). Sem decodificar
+    antes, o parser não enxerga nenhuma tag. HTML já cru (tem "<") passa direto.
+    """
+    if "<" in conteudo_html:
+        return conteudo_html
+    return html.unescape(conteudo_html)
+
+
 def html_para_texto_plano(conteudo_html: str | None) -> str:
     """
-    O campo de descrição do Tiflux é TEXTO PURO, não renderiza HTML — mandar as
-    tags do GLPI direto faz elas aparecerem literalmente pro atendente. Essa
-    função extrai só o texto, mantendo parágrafos/quebras de linha/listas legíveis.
+    Extrai só o texto da descrição do GLPI, mantendo parágrafos/quebras de
+    linha/listas legíveis — processamento_chamado.texto_para_html_tiflux() depois
+    reconverte as quebras em <br> pro Tiflux.
+    Ex.: html_para_texto_plano("&#60;p&#62;A&#60;/p&#62;&#60;p&#62;B&#60;/p&#62;") -> "A\\nB"
     """
     if not conteudo_html:
         return ""
 
     parser = _HTMLParaTexto()
-    parser.feed(conteudo_html)
+    parser.feed(_decodificar_html_do_glpi(conteudo_html))
     texto = "".join(parser.partes)
     texto = html.unescape(texto)
 
