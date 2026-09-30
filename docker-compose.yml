@@ -1,7 +1,7 @@
 services:
   sync:
     build: .
-    container_name: glpi-tiflux-sync
+    container_name: tiflux-glpi-sync
     restart: unless-stopped
     environment:
       # Sobrescreve DB_HOST=localhost do .env: dentro do container, localhost é

@@ -2,7 +2,7 @@
 
 Package `sync/`, entrypoint `glpi_tiflux.py` (10-line shim calling `sync.main.main`
 — keep this filename; the scheduler invokes it directly). No framework. Scheduled
-by the Docker container `glpi-tiflux-sync` (`docker/loop_sincronizacao.sh`: run,
+by the Docker container `tiflux-glpi-sync` (`docker/loop_sincronizacao.sh`: run,
 then sleep 300s — never overlaps); manual: `python glpi_tiflux.py`. Env vars
 override `.env` keys (`Config.carregar`); compose sets `DB_HOST=host.docker.internal`. Split into modules 2026-09-08 (see
 decisions/LOG.md); each file stays under the 500-line guideline.
