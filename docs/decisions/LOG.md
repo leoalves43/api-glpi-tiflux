@@ -108,3 +108,4 @@
 2026-09-30 | Container loop traps SIGTERM and finishes the current run before exiting; compose `stop_grace_period: 10m` | sh as PID 1 ignored SIGTERM, so stop/restart hard-killed Python mid-run after 10s; a followup posted but not yet audited would be re-posted next run | none
 2026-09-30 | Rename container glpi-tiflux-sync -> tiflux-glpi-sync | user request | previous container_name
 2026-09-30 | Name compose image tiflux-glpi-sync (was default api-glpi-tiflux-docker-sync) | user request | none
+2026-09-30 | Pin compose project name tiflux-glpi-sync (was folder name api-glpi-tiflux-docker) | user request; name no longer depends on checkout folder | none

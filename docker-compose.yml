@@ -1,3 +1,5 @@
+name: tiflux-glpi-sync
+
 services:
   sync:
     build: .
