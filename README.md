@@ -1,4 +1,4 @@
-# api-glpi-tiflux
+# tiflux-glpi-sync
 
 Sincronização automática de chamados entre **GLPI** (REST, sessão por token) e
 **Tiflux** (REST, bearer), com auditoria em Postgres. Roda em um container
