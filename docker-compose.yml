@@ -1,6 +1,7 @@
 services:
   sync:
     build: .
+    image: tiflux-glpi-sync
     container_name: tiflux-glpi-sync
     restart: unless-stopped
     environment:
