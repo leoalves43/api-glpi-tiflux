@@ -1,8 +1,10 @@
 # Architecture
 
 Package `sync/`, entrypoint `glpi_tiflux.py` (10-line shim calling `sync.main.main`
-— keep this filename; cron invokes it directly). No framework. Run manually or
-via cron: `python glpi_tiflux.py`. Split into modules 2026-09-08 (see
+— keep this filename; the scheduler invokes it directly). No framework. Scheduled
+by the Docker container `glpi-tiflux-sync` (`docker/loop_sincronizacao.sh`: run,
+then sleep 300s — never overlaps); manual: `python glpi_tiflux.py`. Env vars
+override `.env` keys (`Config.carregar`); compose sets `DB_HOST=host.docker.internal`. Split into modules 2026-09-08 (see
 decisions/LOG.md); each file stays under the 500-line guideline.
 
 ## Data flow
@@ -97,8 +99,7 @@ final stdout line (JSON).
 bug above), because that column is the one that tracks whether a Tiflux
 ticket actually exists. A `pg_try_advisory_lock` keyed on `(forcar_sincronizacao,
 id_glpi)` blocks a double-click/two-tab race on the same ticket; it does NOT
-coordinate with the Windows Scheduled Task `GLPI-Tiflux-Sync`, which has no
-lock of its own.
+coordinate with the scheduled container loop, which has no lock of its own.
 
 ## Known pre-existing bug (not fixed, tracked)
 
