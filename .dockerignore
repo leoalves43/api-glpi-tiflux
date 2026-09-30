@@ -1,0 +1,10 @@
+.env
+*.env
+credenciais*.txt
+logs/
+.claude/
+.git/
+**/__pycache__/
+docs/
+openapi-spec-tiflux.json
+run_glpi_tiflux.bat

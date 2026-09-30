@@ -1,0 +1,23 @@
+services:
+  sync:
+    build: .
+    container_name: glpi-tiflux-sync
+    restart: unless-stopped
+    environment:
+      # Sobrescreve DB_HOST=localhost do .env: dentro do container, localhost é
+      # o próprio container. O Postgres publica a 5432 no host.
+      DB_HOST: host.docker.internal
+      TZ: America/Sao_Paulo
+      INTERVALO_SEGUNDOS: "300"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Não usar env_file: o .env tem chaves com espaço antes do "=".
+      - ./.env:/app/.env:ro
+    # Maior que a pior execução: o loop espera a sincronização atual terminar.
+    stop_grace_period: 10m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

@@ -1,6 +1,8 @@
 """Credenciais e constantes de configuração da sincronização GLPI <-> Tiflux."""
 
+import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -112,8 +114,14 @@ class Config:
     tamanho_lote_sondagem: int = 10
 
     @staticmethod
-    def carregar(caminho_credenciais: str = ".env") -> "Config":
-        cred = carregar_credenciais(caminho_credenciais)
+    def carregar(caminho_credenciais: str = ".env", ambiente: Mapping[str, str] | None = None) -> "Config":
+        """
+        Variáveis de ambiente sobrescrevem a chave de mesmo nome do `.env` —
+        o docker-compose usa isso pra trocar DB_HOST (localhost no host,
+        host.docker.internal no container) sem manter dois `.env`.
+        Ex.: Config.carregar(ambiente={"DB_HOST": "host.docker.internal"})
+        """
+        cred = {**carregar_credenciais(caminho_credenciais), **(os.environ if ambiente is None else ambiente)}
         db_schema = cred.get("DB_SCHEMA", "public")
         db_table = cred.get("DB_TABLE", "api_glpi_tiflux")
         db_table_followups = cred.get("DB_TABLE_FOLLOWUPS", "api_glpi_tiflux_followups")

@@ -1,25 +1,20 @@
 # Handoff
 
-DONE (2026-09-29):
-- Tiflux description header now shows GLPI priority name + contract SLA text
-  (`regras_negocio.cabecalho_prioridade_glpi`), sent as HTML with <br><br>
-  between priority / solicitante / descrição. GLPI entity-encoded `content`
-  now decoded before tag stripping. 225 tests. See decisions/LOG.md 2026-09-29.
-  Test tickets (GLPI #34640-34644 / Tiflux #363733-363738) closed both sides.
+DONE (2026-09-30):
+- Docker (Dockerfile, docker-compose.yml, docker/loop_sincronizacao.sh). Env vars
+  override `.env`. 227 tests green in image; container reaches Postgres, GLPI, Tiflux.
+- `.env` DB_SCHEMA typo fixed (tiflux_glpi_sinc -> tiflux_glpi_sync): 161 chamados
+  (max #34668) + 752 followups already there. Loop traps SIGTERM (tested).
 
 NEXT:
-1. Next GLPI followup from a non-requester: confirm Tiflux shows author's name.
-2. Watch next GLPI followup with attachment — lands on the answer, not ticket.
-3. Watch the next real chamado outside ARRECADAÇÃO — técnico 4988 in GLPI.
-4. Followups loop needs connection-per-thread/locking before parallelizing.
-5. 8 duplicate Tiflux tickets from 2026-09-14 still need manual close/merge.
+1. Container LIVE since 2026-09-30 11:52 (constraints restored via
+   scripts/restaurar_constraints_auditoria.sql). First run clean.
+2. GLPI #34669 linked to Tiflux #363865 (no dup), but técnico assign got 400
+   earlier — check técnico on #34669 in GLPI manually.
+3. PHP interface still calls host python; move to `docker compose run` later.
 
 RISKS:
-- Scheduled Task `GLPI-Tiflux-Sync` runs this working dir every 5 min —
-  uncommitted edits go live immediately.
-- Scan latency grows with ticket count (every ~ceil(N/50) runs); raise
-  `tamanho_pagina_followups` if the backlog grows.
-- `forcar_sincronizacao.py`'s advisory lock does not coordinate with that task.
-- Tester who IS Léo/Sania in GLPI: their followups are skipped (anti-echo).
+- Two schedulers on the same DB = duplicate Tiflux tickets/followups.
+- Sync only runs while Docker Desktop is up (user logged in).
 
-CONTEXT: decisions/LOG.md has full rationale per change; ARCHITECTURE.md for module map.
+CONTEXT: specs/001-docker.md, plans/001-docker.md, decisions/LOG.md 2026-09-30.
