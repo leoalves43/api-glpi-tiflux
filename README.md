@@ -1,31 +1,17 @@
 # tiflux-glpi-sync
 
-Sincronização automática de chamados entre **GLPI** (REST, sessão por token) e
-**Tiflux** (REST, bearer), com auditoria em Postgres. Roda em um container
-Docker que repete a sincronização a cada 5 minutos, sem framework.
+Sincronização automática de chamados entre **GLPI** e **Tiflux**, com
+auditoria em Postgres. A cada execução:
 
-## O que faz
+1. **Criação de chamados, GLPI -> Tiflux.** Sonda os chamados novos do GLPI a
+   partir do maior `id_glpi` já sincronizado e cria o equivalente no Tiflux
+   (técnico, prioridade, anexos, campos obrigatórios).
+2. **Followups, nos dois sentidos**, para chamados já sincronizados e ainda
+   abertos.
 
-A cada execução (`sync/main.py:main()`), duas sincronizações independentes:
-
-1. **Criação de chamados, GLPI -> Tiflux.** Sonda `GET /Ticket/{id}`
-   sequencialmente a partir do maior `id_glpi` já confirmado, cria o
-   equivalente no Tiflux (técnico, prioridade, anexos, campos obrigatórios).
-2. **Followups, bidirecional**, para chamados já sincronizados e ainda
-   abertos: comentários/respostas replicados nos dois sentidos
-   (GLPI `ITILFollowup` <-> Tiflux `/answers` e `/internal_communications`).
-
-Duas tabelas Postgres guardam o estado (uma por chamado, uma por followup) e
-servem também como mecanismo de anti-eco entre as duas direções.
-
-Mapa completo de módulos, fluxo de dados e decisões de design:
-**leia `docs/ARCHITECTURE.md`** antes de mexer na lógica de sincronização.
-
-## Requisitos
-
-- Docker com Compose (Docker Desktop no Windows)
-- Postgres acessível a partir do container, com as duas tabelas de auditoria
-- Acesso de rede às APIs do GLPI e do Tiflux
+O estado fica em duas tabelas Postgres (uma por chamado, uma por followup),
+que também evitam o eco entre as duas direções. Antes de mexer na lógica, leia
+`docs/ARCHITECTURE.md`.
 
 ## Configuração
 
@@ -48,21 +34,13 @@ DB_SCHEMA=
 DB_TABLE=api_glpi_tiflux
 ```
 
-`.env` está no `.gitignore` e no `.dockerignore`: nunca é commitado nem entra
-na imagem. O compose monta o arquivo em `/app/.env` somente leitura.
+O `.env` nunca é commitado nem entra na imagem Docker. Variáveis de ambiente
+sobrescrevem o `.env`, então o mesmo arquivo serve com e sem Docker.
 
-**Variáveis de ambiente sobrescrevem o `.env`.** Com isso, o mesmo `.env`
-serve dentro e fora do Docker. O `docker-compose.yml` troca `DB_HOST` por
-`host.docker.internal`, porque dentro do container `localhost` é o próprio
-container. Assim ele alcança o Postgres publicado na porta 5432 do host (por
-exemplo, outro container). Se o Postgres estiver em outra máquina, ajuste o
-`DB_HOST` no compose.
+Parâmetros de negócio (janela de sondagem, grupos observadores, IDs de
+técnico/campo/mesa) ficam em `sync/config.py:Config`.
 
-Demais parâmetros de negócio (janela de sondagem, grupos observadores, IDs de
-técnico/campo/mesa etc.) ficam em `sync/config.py:Config`. Cada campo tem um
-comentário explicando o motivo do valor.
-
-### Banco de dados
+## Banco de dados
 
 Crie as tabelas de auditoria antes da primeira execução:
 
@@ -70,93 +48,73 @@ Crie as tabelas de auditoria antes da primeira execução:
 psql -f criar_tabela_auditoria.sql
 ```
 
-(colunas e chaves de conflito documentadas em `docs/data/audit_tables.toon`).
+Ao migrar um banco existente, use `pg_dump` (estrutura + dados). A gravação
+depende das constraints únicas `id_glpi` e `(direcao, id_origem)`; se elas se
+perderam, rode `scripts/restaurar_constraints_auditoria.sql` (ajuste o schema
+se não for `tiflux_glpi_sync`).
 
-Ao **migrar** um banco existente, leve as constraints junto (use `pg_dump`,
-não uma cópia só de dados). A gravação usa `ON CONFLICT` e depende das
-constraints únicas `id_glpi` e `(direcao, id_origem)`. Se a migração perdeu
-a estrutura, rode `scripts/restaurar_constraints_auditoria.sql`. Ele usa o
-schema `tiflux_glpi_sync`; ajuste se o seu for outro.
+Nunca rode a sincronização com as tabelas **vazias** em um ambiente que já
+sincronizava: a sondagem recomeçaria do início e duplicaria chamados.
 
-Nunca suba o container com as tabelas **vazias** em um ambiente que já
-sincronizava. A sondagem recomeçaria em `id_minimo_glpi`.
+## Rodando com Docker
 
-## Uso
+Requisitos: Docker com Compose (Docker Desktop no Windows), Postgres acessível
+a partir do container e acesso de rede ao GLPI e ao Tiflux.
 
 ```bash
-docker compose up -d --build     # builda e sobe; reinicia sozinho (restart: unless-stopped)
+docker compose up -d --build     # builda e sobe; reinicia sozinho
 docker compose logs -f           # acompanha os logs (horário de America/Sao_Paulo)
 docker compose stop              # para, esperando a execução em andamento terminar
 docker compose down              # para e remove o container
 ```
 
-O container executa `docker/loop_sincronizacao.sh`. O script roda
-`glpi_tiflux.py`, espera `INTERVALO_SEGUNDOS` (padrão 300, definido no
-compose) e repete. Uma execução nunca começa antes da anterior terminar. Um
-`stop` não interrompe uma execução no meio: o container espera até 10 minutos
-(`stop_grace_period`) para ela acabar.
+O container roda a sincronização, espera `INTERVALO_SEGUNDOS` (padrão 300,
+no `docker-compose.yml`) e repete. Uma execução nunca começa antes da anterior
+terminar, e um `stop` espera até 10 minutos para a execução em andamento
+acabar.
 
-Para antecipar a próxima execução sem reiniciar o container, rode
-`.\scripts\forcar_sincronizacao.ps1`. Se já houver uma execução em andamento,
-o script não faz nada.
+Dentro do container, `localhost` é o próprio container. Por isso o compose
+troca `DB_HOST` por `host.docker.internal`, que alcança o Postgres publicado na
+porta 5432 do host. Se o Postgres estiver em outra máquina, ajuste `DB_HOST`
+no compose.
 
-Para rodar sozinho após reiniciar a máquina, ative *Start Docker Desktop when
-you sign in* no Docker Desktop.
+Para o container voltar sozinho após reiniciar a máquina, ative *Start Docker
+Desktop when you sign in* no Docker Desktop.
 
-Forçar a sincronização de um chamado específico que ficou fora da sondagem
-automática (usado pela interface web `interface-web-api-glpi-tiflux`):
+Antecipar a próxima execução sem reiniciar o container (Windows/PowerShell;
+não faz nada se já houver uma execução em andamento):
+
+```powershell
+.\scripts\forcar_sincronizacao.ps1
+```
+
+Forçar a sincronização de um chamado específico que ficou fora da sondagem:
 
 ```bash
 docker compose run --rm sync python -m sync.forcar_sincronizacao --id-glpi 33769
 ```
 
-### Sem Docker
-
-Com Python 3.10+ e o `.env` apontando para o banco (`DB_HOST=localhost`):
-
-```bash
-pip install -r requirements.txt
-python glpi_tiflux.py
-python -m sync.forcar_sincronizacao --id-glpi 33769
-```
-
-Não rode isso em paralelo com o container contra o mesmo banco. Duas
-execuções simultâneas duplicam tickets no Tiflux.
-
-## Testes
-
-Dentro da imagem (mesmo ambiente de produção):
+Testes, no mesmo ambiente de produção:
 
 ```bash
 docker compose run --rm --no-deps sync python -m unittest discover -s tests -t .
 ```
 
-Ou localmente: `python -m unittest discover -s tests -t .` (ou `pytest`).
+## Rodando sem Docker
 
-E/S externa (GLPI, Tiflux, Postgres) é sempre mockada com fakes nomeados em
-`tests/fakes.py` / `tests/fake_clients.py`. Os testes não fazem chamadas de
-rede reais.
+Requisitos: Python 3.10+, Postgres e acesso de rede ao GLPI e ao Tiflux. No
+`.env`, use o host real do banco (por exemplo `DB_HOST=localhost`).
 
-## Estrutura
-
-```
-glpi_tiflux.py          # entrypoint (shim, não mexer no nome)
-sync/                   # toda a lógica — ver docs/ARCHITECTURE.md
-tests/                  # um teste por módulo em sync/
-Dockerfile              # imagem Python 3.13-slim + tzdata, usuário sem root
-docker-compose.yml      # serviço `sync`: .env montado, DB_HOST, TZ, intervalo
-docker/                 # loop_sincronizacao.sh (agendamento + parada segura)
-scripts/                # SQL de manutenção do banco
-docs/                   # ver docs/INDEX.md
+```bash
+pip install -r requirements.txt
+python glpi_tiflux.py                                    # uma execução
+python -m sync.forcar_sincronizacao --id-glpi 33769      # um chamado específico
+python -m unittest discover -s tests -t .                # testes
 ```
 
-## Documentação
+`glpi_tiflux.py` roda uma vez e termina. Para repetir, agende-o (Agendador de
+Tarefas do Windows, cron) sem permitir execuções sobrepostas.
 
-Comece por `docs/INDEX.md`. Não leia `docs/` inteiro: cada doc lá diz
-quando deve ser lido.
-
-- `docs/ARCHITECTURE.md`: módulos, fluxo de dados, APIs externas, bug conhecido
-- `docs/state/HANDOFF.md`: status atual, próximos passos, riscos abertos
-- `docs/decisions/LOG.md`: por que cada decisão não óbvia foi tomada
-- `docs/data/audit_tables.toon`: schema das tabelas de auditoria
-- `docs/specs/001-docker.md` e `docs/plans/001-docker.md`: migração para Docker
+**Não rode sem Docker enquanto o container estiver ligado contra o mesmo
+banco.** Duas sincronizações simultâneas duplicam chamados e followups no
+Tiflux.

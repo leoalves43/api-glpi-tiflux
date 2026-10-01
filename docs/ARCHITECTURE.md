@@ -86,8 +86,8 @@ Full DDL and column reference: `docs/data/audit_tables.toon`. Summary:
 
 ## Manual force-sync entrypoint
 
-`sync/forcar_sincronizacao.py`, driven by a separate PHP interface
-(`interface-web-api-glpi-tiflux`, sibling project) for when a ticket falls
+`sync/forcar_sincronizacao.py`, run by hand (README); the PHP interface
+(`interface-web-api-glpi-tiflux`) that drove it is paused. For when a ticket falls
 out of the automatic sondagem/rotation windows. Reuses `processar_chamado`
 and both followup-direction functions directly — no business logic
 duplicated in PHP, which only shells out to this script and parses its

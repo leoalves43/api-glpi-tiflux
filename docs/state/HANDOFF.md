@@ -11,7 +11,7 @@ NEXT:
    scripts/restaurar_constraints_auditoria.sql). First run clean.
 2. GLPI #34669 linked to Tiflux #363865 (no dup), but técnico assign got 400
    earlier — check técnico on #34669 in GLPI manually.
-3. PHP interface still calls host python; move to `docker compose run` later.
+3. PHP web interface paused (2026-10-01); README documents CLI/Docker only.
 
 RISKS:
 - Two schedulers on the same DB = duplicate Tiflux tickets/followups.

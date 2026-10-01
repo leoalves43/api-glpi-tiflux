@@ -109,3 +109,4 @@
 2026-09-30 | Rename container glpi-tiflux-sync -> tiflux-glpi-sync | user request | previous container_name
 2026-09-30 | Name compose image tiflux-glpi-sync (was default api-glpi-tiflux-docker-sync) | user request | none
 2026-09-30 | Pin compose project name tiflux-glpi-sync (was folder name api-glpi-tiflux-docker) | user request; name no longer depends on checkout folder | none
+2026-10-01 | Pause PHP web interface; README covers only Docker and no-Docker CLI | user dropped the interface for now | 2026-09-10 interface as force-sync consumer
