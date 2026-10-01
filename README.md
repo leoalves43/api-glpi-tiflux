@@ -96,6 +96,10 @@ compose) e repete. Uma execução nunca começa antes da anterior terminar. Um
 `stop` não interrompe uma execução no meio: o container espera até 10 minutos
 (`stop_grace_period`) para ela acabar.
 
+Para antecipar a próxima execução sem reiniciar o container, rode
+`.\scripts\forcar_sincronizacao.ps1`. Se já houver uma execução em andamento,
+o script não faz nada.
+
 Para rodar sozinho após reiniciar a máquina, ative *Start Docker Desktop when
 you sign in* no Docker Desktop.
 
