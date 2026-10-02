@@ -60,17 +60,14 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
 | `sync/main.py` | `main()` — wiring, candidate selection, top-level logging |
 | `sync/forcar_sincronizacao.py` | `python -m sync.forcar_sincronizacao --id-glpi N` — manual backup for one ticket skipped by the cron; see below |
 
-`GlpiClient` and `TifluxClient` are constructed once per run (in `main()`) and
-threaded through as parameters — no module-level globals, no per-call
-re-authentication. `TifluxClient` caches the client's valid desks on first use
-(instance attribute, not global).
+Clients are built once per run in `main()` and passed as parameters (no globals,
+no per-call re-auth); `TifluxClient` caches valid desks per instance.
 
 ## Two audit tables (Postgres, schema from `DB_SCHEMA` cred, default `siap_custom`)
 
 Full DDL and column reference: `docs/data/audit_tables.toon`. Summary:
 
-- `api_glpi_tiflux` — one row per GLPI ticket (`id_glpi` unique). Tracks ticket
-  creation only.
+- `api_glpi_tiflux` — one row per GLPI ticket (`id_glpi` unique), creation only.
 - `api_glpi_tiflux_followups` — one row per followup/answer, conflict key
   `(direcao, id_origem)`. Tracks both sync directions and doubles as the
   echo-prevention mechanism (see decisions/LOG.md).
@@ -89,25 +86,15 @@ Full DDL and column reference: `docs/data/audit_tables.toon`. Summary:
 
 ## Manual force-sync entrypoint
 
-`sync/forcar_sincronizacao.py`, run by hand (README); the PHP interface
-(`interface-web-api-glpi-tiflux`) that drove it is paused. For when a ticket falls
-out of the automatic sondagem/rotation windows. Reuses `processar_chamado`
-and both followup-direction functions directly — no business logic
-duplicated in PHP, which only shells out to this script and parses its
-final stdout line (JSON).
-
-`decidir_acao()` picks the action from the audit row alone, never from
-`status` in isolation — `numero_tiflux IS NOT NULL` always means "don't call
-`processar_chamado`," including on `status='erro'` (the known duplication
-bug above), because that column is the one that tracks whether a Tiflux
-ticket actually exists. A `pg_try_advisory_lock` keyed on `(forcar_sincronizacao,
-id_glpi)` blocks a double-click/two-tab race on the same ticket; it does NOT
-coordinate with the scheduled container loop, which has no lock of its own.
+`sync/forcar_sincronizacao.py`, run by hand (README; the PHP interface that drove
+it is paused). Reuses `processar_chamado` and both followup functions; no cascade.
+`decidir_acao()` never calls `processar_chamado` when `numero_tiflux IS NOT NULL`
+(even on `status='erro'`, see bug below). Its `pg_try_advisory_lock` only blocks
+two forced runs on the same ticket, not the container loop.
 
 ## Known pre-existing bug (not fixed, tracked)
 
-If technician assignment fails in `processar_chamado`, the row is stored
-`status='erro'` but *with* a `numero_tiflux` already set. The retry path
-re-runs full ticket creation, which can duplicate the Tiflux ticket. Effect:
-`id_glpi -> numero_tiflux` is only reliable from `status='sucesso'` rows —
-every read path in this codebase already respects that; keep it that way.
+Technician-assignment failure in `processar_chamado` stores `status='erro'` *with*
+`numero_tiflux` set; retrying re-creates (duplicates) the Tiflux ticket. So
+`id_glpi -> numero_tiflux` is only reliable on `status='sucesso'` rows — keep every
+read path filtering on that.
