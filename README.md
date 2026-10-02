@@ -25,7 +25,7 @@ USER_TOKEN=
 URL_TIFLUX=https://api.tiflux.com/api/v2
 TOKEN_TIFLUX=
 
-DB_HOST=localhost
+DB_HOST=
 DB_PORT=5432
 DB_NAME=
 DB_USER=
@@ -73,10 +73,9 @@ no `docker-compose.yml`) e repete. Uma execução nunca começa antes da anterio
 terminar, e um `stop` espera até 10 minutos para a execução em andamento
 acabar.
 
-Dentro do container, `localhost` é o próprio container. Por isso o compose
-troca `DB_HOST` por `host.docker.internal`, que alcança o Postgres publicado na
-porta 5432 do host. Se o Postgres estiver em outra máquina, ajuste `DB_HOST`
-no compose.
+O container usa o `DB_HOST` do `.env` (Postgres em servidor remoto). Não use
+`localhost` ali: dentro do container, `localhost` é o próprio container. Para
+um Postgres na própria máquina, use `DB_HOST=host.docker.internal`.
 
 Para o container voltar sozinho após reiniciar a máquina, ative *Start Docker
 Desktop when you sign in* no Docker Desktop.
@@ -103,7 +102,7 @@ docker compose run --rm --no-deps sync python -m unittest discover -s tests -t .
 ## Rodando sem Docker
 
 Requisitos: Python 3.10+, Postgres e acesso de rede ao GLPI e ao Tiflux. No
-`.env`, use o host real do banco (por exemplo `DB_HOST=localhost`).
+`.env`, use o host real do banco.
 
 ```bash
 pip install -r requirements.txt

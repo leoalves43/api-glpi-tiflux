@@ -110,3 +110,4 @@
 2026-09-30 | Name compose image tiflux-glpi-sync (was default api-glpi-tiflux-docker-sync) | user request | none
 2026-09-30 | Pin compose project name tiflux-glpi-sync (was folder name api-glpi-tiflux-docker) | user request; name no longer depends on checkout folder | none
 2026-10-01 | Pause PHP web interface; README covers only Docker and no-Docker CLI | user dropped the interface for now | 2026-09-10 interface as force-sync consumer
+2026-10-02 | Postgres moved to a remote server (`DB_HOST` in `.env`); compose no longer overrides `DB_HOST` nor maps `host.docker.internal` | Local DB backed up and restored remotely (174 chamados, max #34743, 830 followups, both unique constraints present); same `.env` now works in and out of Docker | supersedes 2026-09-30 compose `DB_HOST=host.docker.internal`
