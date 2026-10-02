@@ -27,6 +27,22 @@ class TestObterChamadosParaVarrerFollowups(unittest.TestCase):
         self.assertEqual(params, (_CONFIG.tamanho_pagina_followups,))
 
 
+class TestObterChamadosPorNumeroTiflux(unittest.TestCase):
+    def test_mapeia_numero_para_id_glpi_e_ultima_acao(self):
+        conn = FakeConnection(respostas=[[(364212, 34769, "encerramento"), (364214, 34768, None)]])
+        self.assertEqual(
+            db_followups.obter_chamados_por_numero_tiflux(conn, _CONFIG, [364212, 364214]),
+            {364212: (34769, "encerramento"), 364214: (34768, None)},
+        )
+
+    def test_passa_numeros_como_parametro_unico(self):
+        conn = FakeConnection(respostas=[[]])
+        db_followups.obter_chamados_por_numero_tiflux(conn, _CONFIG, [1, 2])
+        sql, params = conn.execucoes[0]
+        self.assertEqual(params, ([1, 2],))
+        self.assertIn("t.status = 'sucesso'", sql)
+
+
 class TestObterFollowupsGlpiJaProcessados(unittest.TestCase):
     def test_retorna_conjunto_de_ids_origem(self):
         conn = FakeConnection(respostas=[[(10,), (11,)]])

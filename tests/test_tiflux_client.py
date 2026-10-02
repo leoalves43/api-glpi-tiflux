@@ -1,7 +1,10 @@
 import contextlib
 import io
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+
+import requests
 
 from sync.tiflux_client import TifluxClient
 from tests.fakes import FakeRequests, FakeResponse
@@ -319,6 +322,41 @@ class TestListarPaginado(unittest.TestCase):
         with patch("sync.tiflux_client.requests", fake), _sem_console():
             itens = _client().listar_comunicacoes_internas("T-1", tamanho_pagina=1, max_paginas=20)
         self.assertEqual(itens, [{"id": 1}])
+
+
+class _FakeRequestsSemRede(FakeRequests):
+    """Simula queda de rede: todo GET levanta ConnectionError."""
+
+    def get(self, url, **kwargs):
+        raise requests.ConnectionError("rede fora")
+
+
+class TestListarTicketsAtualizadosDesde(unittest.TestCase):
+    _INICIO = datetime(2026, 10, 2, 15, 0, tzinfo=timezone(timedelta(hours=-3)))
+
+    def test_filtra_cliente_e_data_de_atualizacao_em_utc(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, [{"ticket_number": 1}]))
+        with patch("sync.tiflux_client.requests", fake):
+            itens = _client().listar_tickets_atualizados_desde(self._INICIO, tamanho_pagina=200, max_paginas=10)
+        self.assertEqual(itens, [{"ticket_number": 1}])
+        params = fake.chamadas[0][2]["params"]
+        self.assertEqual(params["update_start_datetime"], "2026-10-02T18:00:00Z")
+        self.assertEqual((params["filter_by"], params["client_ids"], params["offset"]), ("all", "762707", 1))
+
+    def test_pagina_ate_pagina_incompleta(self):
+        fake = FakeRequests()
+        fake.programar("GET", "/tickets", FakeResponse(200, [{"ticket_number": 1}, {"ticket_number": 2}]))
+        fake.programar("GET", "/tickets", FakeResponse(200, [{"ticket_number": 3}]))
+        with patch("sync.tiflux_client.requests", fake):
+            itens = _client().listar_tickets_atualizados_desde(self._INICIO, tamanho_pagina=2, max_paginas=10)
+        self.assertEqual([i["ticket_number"] for i in itens], [1, 2, 3])
+        self.assertEqual([c[2]["params"]["offset"] for c in fake.chamadas], [1, 2])
+
+    def test_falha_de_rede_retorna_lista_vazia(self):
+        with patch("sync.tiflux_client.requests", _FakeRequestsSemRede()), _sem_console():
+            itens = _client().listar_tickets_atualizados_desde(self._INICIO, tamanho_pagina=200, max_paginas=10)
+        self.assertEqual(itens, [])
 
 
 if __name__ == "__main__":

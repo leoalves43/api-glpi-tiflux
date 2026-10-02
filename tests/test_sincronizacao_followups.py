@@ -246,6 +246,24 @@ class TestSincronizarFollowups(unittest.TestCase):
         # única execução é a própria SELECT de candidatos — nada mais rodou
         self.assertEqual(len(conn.execucoes), 1)
 
+    def test_mudanca_de_status_recente_entra_antes_do_rodizio_sem_repetir(self):
+        # Encerramentos/reaberturas no Tiflux não esperam a vez no rodízio
+        # (GLPI #34769 levou ~20 min pra fechar). Chamado que também está na
+        # leva do rodízio roda uma vez só.
+        glpi = FakeGlpiClient()
+        tiflux = FakeTifluxClient()
+        tiflux.tickets_atualizados = [{"ticket_number": 20, "is_closed": True}]
+        glpi.tickets[2] = {"status": 6}
+        glpi.tickets[1] = {"status": 6}
+        conn = FakeConnection(respostas=[
+            [(20, 2, None)],           # obter_chamados_por_numero_tiflux
+            [(1, 10), (2, 20)],        # rodízio
+        ])
+        with _sem_console():
+            sincronizar_followups(conn, _CONFIG, glpi, tiflux)
+        marcados = [params[0] for _, params in conn.execucoes[2:]]
+        self.assertEqual(marcados, [2, 1])
+
     def test_falha_ao_conferir_status_pula_sem_quebrar(self):
         glpi = FakeGlpiClient()
         tiflux = FakeTifluxClient()

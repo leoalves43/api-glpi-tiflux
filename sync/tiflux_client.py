@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from datetime import datetime, timezone
 
 import requests
+from requests import RequestException
 
 from sync.config import Config, log
 from sync.glpi_client import TIMEOUT_PADRAO_SEGUNDOS, Anexo
@@ -318,22 +320,47 @@ class TifluxClient:
     def listar_comunicacoes_internas(self, ticket_number: str, tamanho_pagina: int, max_paginas: int) -> list[dict]:
         return self._listar_paginado("internal_communications", ticket_number, tamanho_pagina, max_paginas)
 
-    def _listar_paginado(self, endpoint: str, ticket_number: str, tamanho_pagina: int, max_paginas: int) -> list[dict]:
+    def listar_tickets_atualizados_desde(self, inicio_utc: datetime, tamanho_pagina: int, max_paginas: int) -> list[dict]:
         """
-        Pagina um endpoint de resposta/comunicação do Tiflux (offset = número da
-        página, não deslocamento de linha — ver doc da API) e retorna todos os itens.
+        Tickets do cliente (abertos e fechados) atualizados no Tiflux a partir de
+        `inicio_utc` — uma consulta paginada em vez de um GET por ticket. Usado
+        pra pegar encerramentos/reaberturas recentes sem esperar o rodízio de
+        followups (ver sincronizacao_followups.sincronizar_followups).
+        Falha de rede vira lista vazia: o rodízio normal continua cobrindo.
+        Ex.: tiflux.listar_tickets_atualizados_desde(datetime.now(timezone.utc) - timedelta(hours=1), 200, 10)
+        """
+        params = {
+            "filter_by": "all",
+            "client_ids": str(self._cliente_id),
+            "update_start_datetime": inicio_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        try:
+            return self._paginar(f"{self._url_base}/tickets", params, tamanho_pagina, max_paginas, "tickets atualizados")
+        # Importada à parte: os testes trocam o módulo `requests` inteiro por um fake.
+        except RequestException as e:
+            log(f"⚠️ Falha ao listar tickets atualizados no Tiflux desde {params['update_start_datetime']}: {e}")
+            return []
+
+    def _listar_paginado(self, endpoint: str, ticket_number: str, tamanho_pagina: int, max_paginas: int) -> list[dict]:
+        url = f"{self._url_base}/tickets/{ticket_number}/{endpoint}"
+        return self._paginar(url, {}, tamanho_pagina, max_paginas, f"{endpoint} do ticket Tiflux #{ticket_number}")
+
+    def _paginar(self, url: str, params: dict[str, str], tamanho_pagina: int, max_paginas: int, descricao: str) -> list[dict]:
+        """
+        Pagina um endpoint de listagem do Tiflux (offset = número da página, não
+        deslocamento de linha — ver doc da API) e retorna todos os itens.
         """
         itens: list[dict] = []
         pagina = 1
         while pagina <= max_paginas:
             resp = self._session.get(
-                f"{self._url_base}/tickets/{ticket_number}/{endpoint}",
-                params={"offset": pagina, "limit": tamanho_pagina},
+                url,
+                params={**params, "offset": pagina, "limit": tamanho_pagina},
                 headers=self._headers_get,
                 timeout=self._timeout,
             )
             if resp.status_code != 200:
-                log(f"⚠️ Falha ao listar {endpoint} do ticket Tiflux #{ticket_number} (status {resp.status_code}): {resp.text}")
+                log(f"⚠️ Falha ao listar {descricao} (status {resp.status_code}): {resp.text}")
                 break
 
             pagina_itens = resp.json()

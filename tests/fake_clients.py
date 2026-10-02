@@ -106,6 +106,8 @@ class FakeTifluxClient:
         self.resposta_publicacao = _FakeHttpResponse(201, {"id": 555})
         self.tickets_reabertos: list[str] = []
         self.resultado_reabrir_ticket: tuple[bool, str | None] = (True, None)
+        self.tickets_atualizados: list[dict] = []
+        self.inicios_listagem_atualizados: list = []
 
     def validar_mesa_do_cliente(self, id_mesa):
         return True if self.mesas_validas is None else id_mesa in self.mesas_validas
@@ -128,6 +130,10 @@ class FakeTifluxClient:
 
     def enviar_anexos(self, ticket_number, anexos):
         return self.resultado_anexos
+
+    def listar_tickets_atualizados_desde(self, inicio_utc, tamanho_pagina, max_paginas):
+        self.inicios_listagem_atualizados.append(inicio_utc)
+        return self.tickets_atualizados
 
     def listar_respostas(self, ticket_number, tamanho_pagina, max_paginas):
         return self.respostas

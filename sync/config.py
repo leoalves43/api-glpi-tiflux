@@ -71,6 +71,13 @@ class Config:
     # Quantos chamados já sincronizados varrer por execução em busca de followups novos
     tamanho_pagina_followups: int = 50
 
+    # Encerramentos/reaberturas no Tiflux atualizados nesta janela são
+    # espelhados no GLPI na execução seguinte, fora do rodízio de followups.
+    # Parado por mais que a janela? O rodízio ainda pega o que ficou pra trás.
+    janela_mudancas_status_tiflux_minutos: int = 60
+    tamanho_pagina_tickets_tiflux: int = 200  # máximo aceito pela API
+    max_paginas_tickets_tiflux: int = 10  # limite de segurança
+
     # Paginação ao listar respostas/comunicações internas de um ticket no Tiflux
     tamanho_pagina_respostas_tiflux: int = 100
     max_paginas_respostas_tiflux: int = 20  # limite de segurança

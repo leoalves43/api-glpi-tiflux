@@ -125,6 +125,27 @@ def obter_ultima_acao_cascata_sucesso(conn, config: Config, id_glpi: int) -> str
         return linha[0] if linha else None
 
 
+def obter_chamados_por_numero_tiflux(conn, config: Config, numeros_tiflux: list[int]) -> dict[int, tuple[int, str | None]]:
+    """
+    numero_tiflux -> (id_glpi, última ação de cascata bem-sucedida) dos
+    chamados sincronizados com sucesso entre `numeros_tiflux`. A ação segue o
+    mesmo critério de obter_ultima_acao_cascata_sucesso (None se não houve).
+    Ex.: obter_chamados_por_numero_tiflux(conn, config, [364212]) -> {364212: (34769, 'encerramento')}
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT t.numero_tiflux, t.id_glpi, f.tipo
+            FROM {config.tabela_auditoria} t
+            LEFT JOIN {config.tabela_followups} f
+              ON f.direcao = 'tiflux_para_glpi' AND f.id_origem = -t.id_glpi AND f.status = 'sucesso'
+            WHERE t.status = 'sucesso' AND t.numero_tiflux = ANY(%s)
+            """,
+            (numeros_tiflux,),
+        )
+        return {numero: (id_glpi, tipo) for numero, id_glpi, tipo in cur.fetchall()}
+
+
 def registrar_chamado_fechado_para_followups(conn, config: Config, id_glpi: int) -> None:
     """
     Marca (sem sincronizar nenhum followup) que este chamado foi conferido e

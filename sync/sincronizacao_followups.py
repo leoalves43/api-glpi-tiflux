@@ -1,11 +1,12 @@
 """Sincronização bidirecional de followups/respostas entre GLPI e Tiflux."""
 
 import html
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sync import db_followups
 from sync.config import Config, log
 from sync.glpi_client import GlpiClient
+from sync.mudancas_status_tiflux import obter_chamados_com_mudanca_de_status
 from sync.regras_negocio import definir_autor_glpi
 from sync.tiflux_client import TifluxClient
 
@@ -47,14 +48,21 @@ def _formatar_data_hora_brasilia(timestamp_utc: str | None) -> str | None:
     return (dt_utc - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M")
 
 
-def sincronizar_followups(conn, config: Config, glpi: GlpiClient, tiflux: TifluxClient) -> None:
+def sincronizar_followups(
+    conn, config: Config, glpi: GlpiClient, tiflux: TifluxClient, agora_utc: datetime | None = None,
+) -> None:
     """
-    Percorre uma leva de chamados já sincronizados (obter_chamados_para_varrer_followups),
-    ignora os que já estão fechados no GLPI (fora do escopo desta varredura,
-    mas marcados via registrar_chamado_fechado_para_followups pra não travar o
-    rodízio), e sincroniza followups nos dois sentidos pros demais.
+    Percorre os chamados com encerramento/reabertura recente no Tiflux
+    (mudancas_status_tiflux) mais uma leva do rodízio de chamados já
+    sincronizados (obter_chamados_para_varrer_followups), ignora os que já
+    estão fechados no GLPI (fora do escopo desta varredura, mas marcados via
+    registrar_chamado_fechado_para_followups pra não travar o rodízio), e
+    sincroniza followups nos dois sentidos pros demais.
     """
-    chamados = db_followups.obter_chamados_para_varrer_followups(conn, config)
+    mudancas = obter_chamados_com_mudanca_de_status(conn, config, tiflux, agora_utc or datetime.now(timezone.utc))
+    if mudancas:
+        log(f"🔁 {len(mudancas)} chamado(s) com encerramento/reabertura recente no Tiflux: {[m[0] for m in mudancas]}")
+    chamados = _juntar_sem_repetir(mudancas, db_followups.obter_chamados_para_varrer_followups(conn, config))
     if not chamados:
         return
 
@@ -66,6 +74,12 @@ def sincronizar_followups(conn, config: Config, glpi: GlpiClient, tiflux: Tiflux
     log(f"Followups. GLPI->Tiflux: {totais['g2t_sucesso']} ok / {totais['g2t_erro']} erro | "
         f"Tiflux->GLPI: {totais['t2g_sucesso']} ok / {totais['t2g_erro']} erro | "
         f"Encerramento/reabertura em cascata: {totais['status_sucesso']} ok / {totais['status_erro']} erro")
+
+
+def _juntar_sem_repetir(primeiros: list[tuple[int, int]], demais: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    # Um chamado nas duas listas rodaria duas vezes na mesma execução.
+    ja_incluidos = {id_glpi for id_glpi, _ in primeiros}
+    return primeiros + [par for par in demais if par[0] not in ja_incluidos]
 
 
 def _sincronizar_chamado_aberto(conn, config, glpi, tiflux, id_glpi, numero_tiflux, totais) -> None:

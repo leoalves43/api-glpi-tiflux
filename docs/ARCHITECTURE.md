@@ -28,8 +28,10 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
    duplicate. Otherwise translates and creates the ticket in Tiflux, assigns a
    technician, uploads attachments.
 2. **Followup sync, bidirectional, for already-synced open tickets.**
-   `sincronizar_followups()` (sync/sincronizacao_followups.py) rotates through a
-   batch of `status='sucesso'` tickets, skips closed ones, and calls:
+   `sincronizar_followups()` (sync/sincronizacao_followups.py) takes tickets whose
+   Tiflux open/closed state changed in the last hour (`mudancas_status_tiflux.py`,
+   one paginated `GET /tickets`) plus a rotating batch of `status='sucesso'`
+   tickets, skips closed ones, and calls:
    - `sincronizar_followups_glpi_para_tiflux()` — GLPI `ITILFollowup` ->
      Tiflux `/client-answers`, always with the GLPI author's name (public only).
    - `sincronizar_followups_tiflux_para_glpi()` — Tiflux answers/internal
@@ -54,6 +56,7 @@ Two independent sync passes per run, both driven from `sync/main.py:main()`:
 | `sync/regras_negocio.py` | category->desk mapping, technician/priority lookup, requester-is-author check |
 | `sync/processamento_chamado.py` | `processar_chamado()` — creates one ticket end to end |
 | `sync/sincronizacao_followups.py` | the two directional sync functions + orchestrator |
+| `sync/mudancas_status_tiflux.py` | picks tickets recently closed/reopened in Tiflux so the cascade runs every cycle |
 | `sync/main.py` | `main()` — wiring, candidate selection, top-level logging |
 | `sync/forcar_sincronizacao.py` | `python -m sync.forcar_sincronizacao --id-glpi N` — manual backup for one ticket skipped by the cron; see below |
 
